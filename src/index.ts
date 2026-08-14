@@ -21,7 +21,6 @@ console.log("Mật khẩu đọc được lúc này là:", process.env.DB_PASSWO
 const app = express();
 
 // SỬA QUAN TRỌNG: Để Render tự động cấp cổng
-const PORT = process.env.PORT || 5000;
 
 // Bật CORS đầy đủ cấu hình
 app.use(cors({
@@ -55,6 +54,7 @@ app.use('/api/kiem-tra', (req: Request, res: Response) => {
 });
 
 // Chạy máy chủ
-app.listen(PORT, () => {
-  console.log(`🚀 Server Backend đang chạy thành công tại cổng: ${PORT}`);
+const PORT = process.env.PORT || 5000;
+app.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`Server đang chạy tại cổng ${PORT}`);
 });
