@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createFolder, getDriveContents, renameFolder } from '../controllers/folderController';
 import { verifyToken, isAdmin } from '../middleware/authMiddleware'; 
+import pool from '../db';
 
 const router = Router();
 

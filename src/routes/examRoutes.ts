@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { saveAnswerKey, submitExam } from '../controllers/examController';
 import { verifyToken } from '../middleware/authMiddleware';
 import { saveAnswerKey, submitExam, getExamSubmissions, getMySubmissions, getExamKey } from '../controllers/examController';
 const router = Router();

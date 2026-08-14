@@ -32,7 +32,6 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
     res.status(403).json({ message: "Token không hợp lệ hoặc đã hết hạn!" });
   }
 };
-import { NextFunction, Response } from 'express';
 
 // Ổ khóa chỉ dành cho Giám đốc
 export const isAdmin = (req: AuthRequest, res: Response, next: NextFunction): void => {
