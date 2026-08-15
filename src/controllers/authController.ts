@@ -3,6 +3,12 @@ import pool from '../db';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
+const dbInfo = await pool.query(`
+  SELECT current_database(), current_user, inet_server_addr(), inet_server_port()
+`);
+
+console.log("DATABASE BACKEND ĐANG DÙNG:", dbInfo.rows);
+
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { username, password } = req.body;
