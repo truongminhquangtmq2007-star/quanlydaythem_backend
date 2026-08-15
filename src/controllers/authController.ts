@@ -3,11 +3,7 @@ import pool from '../db';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-const dbInfo = await pool.query(`
-  SELECT current_database(), current_user, inet_server_addr(), inet_server_port()
-`);
 
-console.log("DATABASE BACKEND ĐANG DÙNG:", dbInfo.rows);
 
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -194,3 +190,8 @@ export const resetTeacherPassword = async (req: Request, res: Response): Promise
     res.status(500).json({ message: "Lỗi máy chủ khi đổi mật khẩu" });
   }
 };
+const dbInfo = await pool.query(`
+  SELECT current_database(), current_user, inet_server_addr(), inet_server_port()
+`);
+
+console.log("DATABASE BACKEND ĐANG DÙNG:", dbInfo.rows);
