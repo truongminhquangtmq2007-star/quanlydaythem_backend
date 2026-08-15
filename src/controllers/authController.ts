@@ -80,38 +80,26 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 // Đăng nhập dành cho Học sinh (Giữ nguyên không đổi)
 export const studentLogin = async (req: Request, res: Response): Promise<void> => {
   const { username, password } = req.body;
-
   try {
-console.log("USERNAME NHẬN ĐƯỢC:", JSON.stringify(username), "length:", username.length);
     const result = await pool.query(
-      'SELECT id, username, password FROM students WHERE username = $1',
+      'SELECT id, username, password, full_name FROM students WHERE username = $1',
       [username]
     );
-
-    console.log("KẾT QUẢ DATABASE:", result.rows);
-
     const student = result.rows[0];
-
     if (!student) {
       res.status(400).json({ message: 'Tài khoản không tồn tại!' });
       return;
     }
-
     const isMatch = await bcrypt.compare(password, student.password);
-
-    console.log("PASSWORD MATCH:", isMatch);
-
     if (!isMatch) {
       res.status(400).json({ message: 'Sai mật khẩu!' });
       return;
     }
-
     const token = jwt.sign(
       { id: student.id, role: 'student', full_name: student.full_name },
       process.env.JWT_SECRET as string,
       { expiresIn: '1d' }
     );
-
     res.json({
       message: 'Đăng nhập thành công',
       token,

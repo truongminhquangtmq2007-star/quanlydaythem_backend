@@ -30,7 +30,8 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
 
         res.status(200).json({ message: 'Lưu thành công!' });
     } catch (error) {
-        res.status(500).json({ message: 'Lỗi server' });
+        console.error('LỖI LƯU ĐÁP ÁN CHI TIẾT:', error);   // ← DÒNG MỚI THÊM
+        res.status(500).json({ message: 'Lỗi server', detail: (error as Error).message });   // ← THÊM detail để thấy lỗi ngay trên Console trình duyệt luôn
     }
 };
 // ========================================================
