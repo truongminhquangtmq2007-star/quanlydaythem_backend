@@ -82,8 +82,7 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
   const { username, password } = req.body;
 
   try {
-    console.log("USERNAME NHẬN ĐƯỢC:", username);
-
+console.log("USERNAME NHẬN ĐƯỢC:", JSON.stringify(username), "length:", username.length);
     const result = await pool.query(
       'SELECT id, username, password FROM students WHERE username = $1',
       [username]
@@ -190,8 +189,3 @@ export const resetTeacherPassword = async (req: Request, res: Response): Promise
     res.status(500).json({ message: "Lỗi máy chủ khi đổi mật khẩu" });
   }
 };
-const dbInfo = await pool.query(`
-  SELECT current_database(), current_user, inet_server_addr(), inet_server_port()
-`);
-
-console.log("DATABASE BACKEND ĐANG DÙNG:", dbInfo.rows);
