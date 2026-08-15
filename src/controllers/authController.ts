@@ -80,7 +80,15 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
   const { username, password } = req.body;
 
   try {
-    const result = await pool.query('SELECT * FROM students WHERE username = $1', [username]);
+    console.log("USERNAME NHẬN ĐƯỢC:", username);
+
+    const result = await pool.query(
+      'SELECT id, username, password FROM students WHERE username = $1',
+      [username]
+    );
+
+    console.log("KẾT QUẢ DATABASE:", result.rows);
+
     const student = result.rows[0];
 
     if (!student) {
@@ -89,6 +97,9 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
     }
 
     const isMatch = await bcrypt.compare(password, student.password);
+
+    console.log("PASSWORD MATCH:", isMatch);
+
     if (!isMatch) {
       res.status(400).json({ message: 'Sai mật khẩu!' });
       return;
@@ -97,7 +108,7 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
     const token = jwt.sign(
       { id: student.id, role: 'student', full_name: student.full_name },
       process.env.JWT_SECRET as string,
-      { expiresIn: '1d' } 
+      { expiresIn: '1d' }
     );
 
     res.json({
@@ -110,7 +121,7 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
       }
     });
   } catch (error) {
-    console.error("Lỗi đăng nhập học sinh:", error);
+    console.error("LỖI LOGIN STUDENT:", error);
     res.status(500).json({ message: 'Lỗi server' });
   }
 };
