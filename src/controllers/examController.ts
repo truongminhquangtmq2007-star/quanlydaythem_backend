@@ -5,11 +5,12 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { parseFullExamFromFileWithGemini } from '../services/geminiService';
 
 // ========================================================
-// 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀO DATABASE
+// 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀ NỘI DUNG ĐỀ VÀO DATABASE
 // ========================================================
 export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes } = req.body;
+        // NHẬN THÊM BIẾN exam_content TỪ FRONTEND
+        const { document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content } = req.body;
 
         const currentData = await pool.query('SELECT part1_key, part2_key, part3_key FROM exam_keys WHERE document_id = $1', [document_id]);
         const old = currentData.rows[0] || { part1_key: {}, part2_key: {}, part3_key: {} };
@@ -18,24 +19,24 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
         const p2 = part2_key && Object.keys(part2_key).length > 0 ? part2_key : old.part2_key;
         const p3 = part3_key && Object.keys(part3_key).length > 0 ? part3_key : old.part3_key;
 
+        // CẬP NHẬT LỆNH SQL: THÊM exam_content VÀO CẢ INSERT LẪN UPDATE
         const result = await pool.query(
-            `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7) 
+            `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
              ON CONFLICT (document_id) 
              DO UPDATE SET 
                 part1_key = $3, part2_key = $4, part3_key = $5,
-                allow_view_answers = $6, duration_minutes = $7
+                allow_view_answers = $6, duration_minutes = $7, exam_content = $8
              RETURNING *`,
-            [document_id, class_id, p1, p2, p3, allow_view_answers, duration_minutes]
+            [document_id, class_id, p1, p2, p3, allow_view_answers, duration_minutes, exam_content]
         );
 
-        res.status(200).json({ message: 'Lưu thành công!' });
+        res.status(200).json({ message: 'Lưu đề thi và đáp án thành công!' });
     } catch (error) {
-        console.error('LỖI LƯU ĐÁP ÁN CHI TIẾT:', error);
+        console.error('LỖI LƯU ĐÁP ÁN VÀ NỘI DUNG ĐỀ:', error);
         res.status(500).json({ message: 'Lỗi server', detail: (error as Error).message });
     }
 };
-
 // ========================================================
 // 2. API HỌC SINH: NỘP BÀI VÀ CHẤM ĐIỂM TỰ ĐỘNG
 // ========================================================
@@ -152,13 +153,15 @@ export const getMySubmissions = async (req: AuthRequest, res: Response): Promise
 };
 
 // ========================================================
-// 5. API GIÁO VIÊN: PHỤC HỒI ĐÁP ÁN CHUẨN ĐÃ LƯU
+// 5. API GIÁO VIÊN/HỌC SINH: LẤY DỮ LIỆU ĐỀ THI
 // ========================================================
 export const getExamKey = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { document_id } = req.params;
+        
+        // CẬP NHẬT LỆNH SQL: SELECT THÊM exam_content ĐỂ TRẢ VỀ CHO FRONTEND
         const result = await pool.query(
-            `SELECT part1_key, part2_key, part3_key, allow_view_answers, duration_minutes 
+            `SELECT part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content 
              FROM exam_keys WHERE document_id = $1`,
             [document_id]
         );
@@ -169,7 +172,7 @@ export const getExamKey = async (req: AuthRequest, res: Response): Promise<void>
             res.status(200).json(null);
         }
     } catch (error) {
-        console.error('Lỗi lấy đáp án chuẩn:', error);
+        console.error('Lỗi lấy dữ liệu đề thi:', error);
         res.status(500).json({ message: 'Lỗi server' });
     }
 };
@@ -178,69 +181,28 @@ export const getExamKey = async (req: AuthRequest, res: Response): Promise<void>
 // 6. API MỚI: TỰ ĐỘNG TẠO ĐỀ VÀ ĐÁP ÁN TỪ VĂN BẢN (GEMINI)
 // ========================================================
 export const createExamFromText = async (req: AuthRequest, res: Response): Promise<void> => {
-    // SỬA Ở ĐÂY: Hứng đúng tên biến document_id và class_id từ Frontend/Postman gửi lên
     const { rawText, class_id, document_id, durationMinutes } = req.body;
   
     try {
-      // 1. Gửi văn bản cho Gemini xử lý
-      const fullExam = await parseFullExamFromFileWithGemini(rawText);
+      // 1. Gửi văn bản cho Gemini xử lý (Đã sửa lại gọi đúng hàm Text)
+      const fullExam = await  parseFullExamFromFileWithGemini(rawText);
   
       // 2. Trích xuất đáp án đúng của từng phần
-      const part1Key = fullExam.part1.reduce((acc: any, q: any) => {
-        acc[q.id] = q.correctAnswer;
-        return acc;
-      }, {});
+      const part1Key = fullExam.part1.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+      const part2Key = fullExam.part2.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+      const part3Key = fullExam.part3.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
   
-      const part2Key = fullExam.part2.reduce((acc: any, q: any) => {
-        acc[q.id] = q.correctAnswer;
-        return acc;
-      }, {});
-  
-      const part3Key = fullExam.part3.reduce((acc: any, q: any) => {
-        acc[q.id] = q.correctAnswer;
-        return acc;
-      }, {});
-  
-      // 3. Tự động lưu đáp án chuẩn vào Database
-      const checkExist = await pool.query('SELECT id FROM exam_keys WHERE document_id = $1', [document_id]);
-  
-      let result;
-      if (checkExist.rows.length > 0) {
-        // Nếu đã tồn tại đáp án cho đề này -> Cập nhật lại
-        result = await pool.query(
-          `UPDATE exam_keys 
-           SET part1_key = $1, part2_key = $2, part3_key = $3, duration_minutes = $4
-           WHERE document_id = $5
-           RETURNING *`,
-          [
-            JSON.stringify(part1Key),
-            JSON.stringify(part2Key),
-            JSON.stringify(part3Key),
-            durationMinutes || 50,
-            document_id
-          ]
-        );
-      } else {
-        // Nếu chưa có -> Thêm mới
-        result = await pool.query(
-          `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, duration_minutes, allow_view_answers)
-           VALUES ($1, $2, $3, $4, $5, $6, true)
-           RETURNING *`,
-          [
-            document_id,
-            class_id,
-            JSON.stringify(part1Key),
-            JSON.stringify(part2Key),
-            JSON.stringify(part3Key),
-            durationMinutes || 50
-          ]
-        );
-      }
-  
-      // 4. Trả về cả đáp án đã lưu (cho DB) và nội dung chi tiết (cho Frontend hiển thị)
+      // 3. KHÔNG LƯU DATABASE TỰ ĐỘNG NỮA. CHỈ TRẢ VỀ CHO FRONTEND.
       res.status(200).json({
-        message: 'Tạo đề thi 3 phần bằng AI thành công!',
-        examKey: result.rows[0],
+        message: 'Bóc tách văn bản thành công! Vui lòng kiểm tra và chỉnh sửa trước khi lưu.',
+        examKey: {
+            part1_key: part1Key,
+            part2_key: part2Key,
+            part3_key: part3Key,
+            document_id: document_id,
+            class_id: class_id,
+            duration_minutes: durationMinutes || 50
+        },
         examContent: fullExam, 
       });
     } catch (error: any) {
@@ -255,7 +217,6 @@ export const createExamFromText = async (req: AuthRequest, res: Response): Promi
 export const parseExamFromFile = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { document_id, class_id, durationMinutes } = req.body;
-        // Ép kiểu req sang any để lấy thuộc tính file do Multer gắn vào
         const file = (req as any).file; 
 
         if (!file) {
@@ -273,31 +234,19 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
         const part2Key = fullExam.part2.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
         const part3Key = fullExam.part3.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
 
-        // 3. Tự động lưu đáp án chuẩn vào Database
-        const checkExist = await pool.query('SELECT id FROM exam_keys WHERE document_id = $1', [document_id]);
-
-        let result;
-        if (checkExist.rows.length > 0) {
-            result = await pool.query(
-                `UPDATE exam_keys 
-                 SET part1_key = $1, part2_key = $2, part3_key = $3, duration_minutes = $4
-                 WHERE document_id = $5 RETURNING *`,
-                [JSON.stringify(part1Key), JSON.stringify(part2Key), JSON.stringify(part3Key), durationMinutes || 50, document_id]
-            );
-        } else {
-            result = await pool.query(
-                `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, duration_minutes, allow_view_answers)
-                 VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING *`,
-                [document_id, class_id, JSON.stringify(part1Key), JSON.stringify(part2Key), JSON.stringify(part3Key), durationMinutes || 50]
-            );
-        }
-
         console.log('--- XỬ LÝ FILE HOÀN TẤT ---');
 
-        // 4. Trả về kết quả cho Frontend hiển thị
+        // 3. KHÔNG LƯU DATABASE TỰ ĐỘNG NỮA. CHỈ TRẢ VỀ CHO FRONTEND.
         res.status(200).json({ 
-            message: 'Phân tích file bằng AI thành công!',
-            examKey: result.rows[0],
+            message: 'Phân tích file bằng AI thành công! Vui lòng kiểm tra và chỉnh sửa trước khi lưu.',
+            examKey: {
+                part1_key: part1Key,
+                part2_key: part2Key,
+                part3_key: part3Key,
+                document_id: document_id,
+                class_id: class_id,
+                duration_minutes: durationMinutes || 50
+            },
             examContent: fullExam
         });
     } catch (error: any) {
