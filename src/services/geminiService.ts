@@ -124,7 +124,7 @@ ${rawText}
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash', 
+      model: 'gemini-3.7-flash', 
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -160,7 +160,7 @@ YÊU CẦU ĐẶC BIỆT:
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-pro', // Dùng bản Pro để đọc ảnh/PDF và giải toán chính xác hơn
+      model: 'gemini-3.7-pro', // Dùng bản Pro để đọc ảnh/PDF và giải toán chính xác hơn
       contents: [
         prompt,
         {
