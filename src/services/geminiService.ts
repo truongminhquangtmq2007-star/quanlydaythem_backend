@@ -160,7 +160,7 @@ YÊU CẦU ĐẶC BIỆT:
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.7-pro', // Dùng bản Pro để đọc ảnh/PDF và giải toán chính xác hơn
+      model: 'gemini-3.7-flash', // Dùng bản Pro để đọc ảnh/PDF và giải toán chính xác hơn
       contents: [
         prompt,
         {
