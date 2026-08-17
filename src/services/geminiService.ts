@@ -44,7 +44,6 @@ export interface FullExamData {
 
 // ==========================================
 // ĐỊNH NGHĨA SCHEMA DÙNG CHUNG CHO CẢ TEXT VÀ FILE
-// (Ép AI phải trả về đúng cấu trúc JSON này)
 // ==========================================
 const examResponseSchema = {
   type: Type.OBJECT,
@@ -108,16 +107,16 @@ const examResponseSchema = {
 // ==========================================
 export async function parseFullExamWithGemini(rawText: string): Promise<FullExamData> {
   const prompt = `
-Bạn là một chuyên gia số hóa đề thi Toán học/Khoa học.
-Nhiệm vụ: Phân tích toàn bộ nội dung đề thi được cung cấp và bóc tách thành đúng 3 phần theo chuẩn đề thi mới:
-
-1. PHẦN I (part1): Câu trắc nghiệm nhiều phương án lựa chọn (A, B, C, D).
-2. PHẦN II (part2): Câu trắc nghiệm Đúng/Sai. Mỗi câu có ngữ cảnh và 4 mệnh đề a, b, c, d. Đáp án mỗi mệnh đề là 'Đ' (Đúng) hoặc 'S' (Sai).
-3. PHẦN III (part3): Câu trắc nghiệm trả lời ngắn (học sinh tự điền số/kết quả).
+Bạn là một giáo viên Toán học xuất sắc và chuyên gia số hóa đề thi.
+Nhiệm vụ: Phân tích nội dung đề thi và bóc tách thành đúng 3 phần theo chuẩn.
 
 YÊU CẦU BẮT BUỘC:
-- Mọi công thức Toán/Ký hiệu khoa học phải được chuyển thành định dạng LaTeX chuẩn (kẹp giữa dấu $, ví dụ: $f(x) = 9^x$).
-- Trả về định dạng JSON thuần túy theo đúng Schema quy định.
+1. LATEX: Mọi công thức Toán/Ký hiệu khoa học phải được chuyển thành định dạng LaTeX chuẩn (kẹp giữa dấu $, ví dụ: $f(x) = 9^x$).
+2. TỰ GIẢI TOÁN: Nếu đề thi KHÔNG CÓ CUNG CẤP ĐÁP ÁN, bạn BẮT BUỘC phải đóng vai giáo viên để TỰ GIẢI các bài toán đó và điền kết quả vào trường correctAnswer.
+3. FORMAT ĐÁP ÁN: 
+   - Phần 1: correctAnswer chỉ điền A, B, C, hoặc D.
+   - Phần 2 (Đúng/Sai): correctAnswer của mỗi mệnh đề a, b, c, d BẮT BUỘC chỉ được điền chính xác một chữ cái "Đ" (nếu mệnh đề đó Đúng) hoặc "S" (nếu mệnh đề đó Sai). Tuyệt đối không điền chữ "Đúng", "Sai", "True", hay "False".
+4. Trả về định dạng JSON thuần túy theo đúng Schema quy định.
 
 Nội dung đề thi:
 ${rawText}
@@ -125,7 +124,7 @@ ${rawText}
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash', // Sửa lại thành bản 1.5
+      model: 'gemini-1.5-flash', 
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -150,11 +149,18 @@ ${rawText}
 // ==========================================
 export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File): Promise<FullExamData> => {
   try {
-    const prompt = `Bạn là một chuyên gia số hóa đề thi Toán học/Khoa học. Hãy đọc file đề thi đính kèm và bóc tách dữ liệu thành đúng 3 phần (Trắc nghiệm nhiều lựa chọn, Đúng/Sai, Trả lời ngắn). Trả về JSON thuần túy theo Schema quy định. Nhớ giữ nguyên các công thức Toán học chuẩn LaTeX.`;
+    // Ép AI tự giải toán và chuẩn hóa output Đ/S cực kỳ rõ ràng
+    const prompt = `
+Bạn là một giáo viên Toán học xuất sắc và chuyên gia số hóa đề thi. Hãy đọc file đề thi đính kèm và bóc tách dữ liệu thành 3 phần. 
 
-    // Gọi SDK mới, truyền cả văn bản và file dưới dạng Base64
+YÊU CẦU ĐẶC BIỆT:
+1. Nếu đề bài không có sẵn đáp án cuối file, BẮT BUỘC bạn phải TỰ GIẢI toàn bộ các câu hỏi để tìm ra đáp án đúng.
+2. Đối với Phần 2 (Câu trắc nghiệm Đúng/Sai), ở mục correctAnswer của từng mệnh đề a, b, c, d, bạn BẮT BUỘC CHỈ ĐƯỢC ĐIỀN chữ "Đ" hoặc chữ "S". Tuyệt đối cấm điền các từ ngữ khác.
+3. Chuyển toàn bộ công thức sang định dạng LaTeX (kẹp giữa dấu $).
+    `;
+
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-1.5-pro', // Dùng bản Pro để đọc ảnh/PDF và giải toán chính xác hơn
       contents: [
         prompt,
         {
@@ -166,7 +172,7 @@ export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File)
       ],
       config: {
         responseMimeType: 'application/json',
-        responseSchema: examResponseSchema, // Dùng chung Schema với phần Text
+        responseSchema: examResponseSchema,
       }
     });
 
