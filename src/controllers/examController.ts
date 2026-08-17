@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
+// 👇 Nhập hàm gọi Gemini từ service bạn vừa tạo
+import { parseFullExamWithGemini } from '../services/geminiService';
 
 // ========================================================
 // 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀO DATABASE
@@ -9,7 +11,6 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
     try {
         const { document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes } = req.body;
 
-        // Nếu part1_key rỗng (do gạt nút), ta sẽ lấy đáp án cũ từ DB để giữ lại
         const currentData = await pool.query('SELECT part1_key, part2_key, part3_key FROM exam_keys WHERE document_id = $1', [document_id]);
         const old = currentData.rows[0] || { part1_key: {}, part2_key: {}, part3_key: {} };
 
@@ -30,10 +31,11 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
 
         res.status(200).json({ message: 'Lưu thành công!' });
     } catch (error) {
-        console.error('LỖI LƯU ĐÁP ÁN CHI TIẾT:', error);   // ← DÒNG MỚI THÊM
-        res.status(500).json({ message: 'Lỗi server', detail: (error as Error).message });   // ← THÊM detail để thấy lỗi ngay trên Console trình duyệt luôn
+        console.error('LỖI LƯU ĐÁP ÁN CHI TIẾT:', error);
+        res.status(500).json({ message: 'Lỗi server', detail: (error as Error).message });
     }
 };
+
 // ========================================================
 // 2. API HỌC SINH: NỘP BÀI VÀ CHẤM ĐIỂM TỰ ĐỘNG
 // ========================================================
@@ -42,7 +44,6 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
         const studentId = req.user?.id;
         const { document_id, student_answers, cheat_count } = req.body;
 
-        // 1. Kéo đáp án chuẩn của đề này từ Database
         const keyResult = await pool.query(`SELECT * FROM exam_keys WHERE document_id = $1`, [document_id]);
         if (keyResult.rows.length === 0) {
             res.status(404).json({ message: 'Đề thi này chưa được giáo viên thiết lập đáp án!' });
@@ -52,14 +53,12 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
         const answerKey = keyResult.rows[0];
         let p1Score = 0, p2Score = 0, p3Score = 0;
 
-        // 2. CHẤM PHẦN I (Mỗi câu đúng 0.25 điểm)
         if (student_answers.part1) {
             for (const [q, ans] of Object.entries(student_answers.part1)) {
                 if (answerKey.part1_key[q] === ans) p1Score += 0.25;
             }
         }
 
-        // 3. CHẤM PHẦN II (Đúng/Sai - Tính điểm lũy tiến)
         if (student_answers.part2) {
             for (const [q, subAns] of Object.entries(student_answers.part2)) {
                 const key = answerKey.part2_key[q];
@@ -68,12 +67,10 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
                 let correctCount = 0;
                 const subObj = subAns as any;
                 
-                // Đếm số ý trả lời đúng (khớp với đáp án chuẩn)
                 ['a', 'b', 'c', 'd'].forEach(sub => {
                     if (subObj[sub] && subObj[sub] === key[sub]) correctCount++;
                 });
 
-                // Quy tắc lũy tiến 2025
                 if (correctCount === 1) p2Score += 0.1;
                 else if (correctCount === 2) p2Score += 0.25;
                 else if (correctCount === 3) p2Score += 0.5;
@@ -81,10 +78,8 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
             }
         }
 
-        // 4. CHẤM PHẦN III (Trả lời ngắn - Mỗi câu đúng 0.5 điểm)
         if (student_answers.part3) {
             for (const [q, ans] of Object.entries(student_answers.part3)) {
-                // Ép kiểu về chuỗi và loại bỏ khoảng trắng thừa để đối chiếu chính xác
                 const studentVal = String(ans).trim();
                 const keyVal = String(answerKey.part3_key[q]).trim();
                 
@@ -94,7 +89,6 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
 
         const totalScore = p1Score + p2Score + p3Score;
 
-        // 5. Lưu kết quả, chi tiết bài làm VÀ SỐ LẦN GIAN LẬN vào Database
         const submitResult = await pool.query(
             `INSERT INTO exam_submissions 
             (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count) 
@@ -102,13 +96,11 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
             [document_id, studentId, student_answers, totalScore, p1Score, p2Score, p3Score, cheat_count || 0]
         );
 
-        // 6. Báo cáo kết quả lập tức cho Học sinh
-        // 6. Báo cáo kết quả lập tức cho Học sinh (ĐÃ SỬA CHỖ NÀY)
         res.status(200).json({ 
             message: 'Nộp bài và chấm điểm thành công!', 
             score: { 
                 totalScore, p1Score, p2Score, p3Score,
-                allow_view_answers: answerKey.allow_view_answers // Bổ sung dòng này để báo cho Frontend
+                allow_view_answers: answerKey.allow_view_answers
             },
             submissionId: submitResult.rows[0].id
         });
@@ -121,13 +113,9 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
 // ========================================================
 // 3. API GIÁO VIÊN: LẤY DANH SÁCH BÀI NỘP CỦA HỌC SINH
 // ========================================================
-// ========================================================
-// 3. API GIÁO VIÊN: LẤY DANH SÁCH BÀI NỘP CỦA HỌC SINH
-// ========================================================
 export const getExamSubmissions = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { document_id } = req.params;
-        // Đã sửa thành u.username khớp với cấu trúc cơ sở dữ liệu của bạn
         const result = await pool.query(
             `SELECT es.*, u.username as student_name 
              FROM exam_submissions es 
@@ -183,5 +171,114 @@ export const getExamKey = async (req: AuthRequest, res: Response): Promise<void>
     } catch (error) {
         console.error('Lỗi lấy đáp án chuẩn:', error);
         res.status(500).json({ message: 'Lỗi server' });
+    }
+};
+
+// ========================================================
+// 6. API MỚI: TỰ ĐỘNG TẠO ĐỀ VÀ ĐÁP ÁN TỪ VĂN BẢN (GEMINI)
+// ========================================================
+export const createExamFromText = async (req: AuthRequest, res: Response): Promise<void> => {
+    // SỬA Ở ĐÂY: Hứng đúng tên biến document_id và class_id từ Frontend/Postman gửi lên
+    const { rawText, class_id, document_id, durationMinutes } = req.body;
+  
+    try {
+      // 1. Gửi văn bản cho Gemini xử lý
+      const fullExam = await parseFullExamWithGemini(rawText);
+  
+      // 2. Trích xuất đáp án đúng của từng phần
+      const part1Key = fullExam.part1.reduce((acc: any, q: any) => {
+        acc[q.id] = q.correctAnswer;
+        return acc;
+      }, {});
+  
+      const part2Key = fullExam.part2.reduce((acc: any, q: any) => {
+        acc[q.id] = q.correctAnswer;
+        return acc;
+      }, {});
+  
+      const part3Key = fullExam.part3.reduce((acc: any, q: any) => {
+        acc[q.id] = q.correctAnswer;
+        return acc;
+      }, {});
+  
+      // 3. Tự động lưu đáp án chuẩn vào Database
+      const checkExist = await pool.query('SELECT id FROM exam_keys WHERE document_id = $1', [document_id]);
+  
+      let result;
+      if (checkExist.rows.length > 0) {
+        // Nếu đã tồn tại đáp án cho đề này -> Cập nhật lại
+        result = await pool.query(
+          `UPDATE exam_keys 
+           SET part1_key = $1, part2_key = $2, part3_key = $3, duration_minutes = $4
+           WHERE document_id = $5
+           RETURNING *`,
+          [
+            JSON.stringify(part1Key),
+            JSON.stringify(part2Key),
+            JSON.stringify(part3Key),
+            durationMinutes || 50,
+            document_id
+          ]
+        );
+      } else {
+        // Nếu chưa có -> Thêm mới
+        result = await pool.query(
+          `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, duration_minutes, allow_view_answers)
+           VALUES ($1, $2, $3, $4, $5, $6, true)
+           RETURNING *`,
+          [
+            document_id,
+            class_id,
+            JSON.stringify(part1Key),
+            JSON.stringify(part2Key),
+            JSON.stringify(part3Key),
+            durationMinutes || 50
+          ]
+        );
+      }
+  
+      // 4. Trả về cả đáp án đã lưu (cho DB) và nội dung chi tiết (cho Frontend hiển thị)
+      res.status(200).json({
+        message: 'Tạo đề thi 3 phần bằng AI thành công!',
+        examKey: result.rows[0],
+        examContent: fullExam, 
+      });
+    } catch (error: any) {
+      console.error('Lỗi bóc tách đề bằng AI:', error);
+      res.status(500).json({ message: 'Lỗi bóc tách đề', detail: error.message });
+    }
+};
+
+// ========================================================
+// 7. API MỚI: TỰ ĐỘNG TẠO ĐỀ TỪ FILE (PDF/ẢNH)
+// ========================================================
+export const parseExamFromFile = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { document_id, class_id, durationMinutes } = req.body;
+        // Ép kiểu req sang any để lấy thuộc tính file do Multer gắn vào
+        const file = (req as any).file; 
+
+        if (!file) {
+            res.status(400).json({ message: 'Không tìm thấy file tải lên!' });
+            return;
+        }
+
+        console.log('--- ĐÃ NHẬN ĐƯỢC FILE TỪ FRONTEND ---');
+        console.log('Tên file:', file.originalname);
+        console.log('Dung lượng:', file.size, 'bytes');
+        console.log('Định dạng:', file.mimetype);
+        console.log('-------------------------------------');
+
+        // TODO: Gửi file.buffer này cho AI Gemini xử lý (Chúng ta sẽ làm ở bước tiếp theo)
+
+        res.status(200).json({ 
+            message: 'Đã nhận file thành công! Chuẩn bị gọi AI...',
+            // Tạm thời trả về data rỗng để Frontend không bị lỗi hiển thị Preview
+            examKey: { part1_key: {}, part2_key: {}, part3_key: {} },
+            examContent: { part1: [], part2: [], part3: [] }
+        });
+    } catch (error: any) {
+        console.error('Lỗi nhận file:', error);
+        res.status(500).json({ message: 'Lỗi server khi nhận file', detail: error.message });
     }
 };

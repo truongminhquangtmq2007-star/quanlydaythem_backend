@@ -18,7 +18,7 @@ pool.on('error', (err) => {
   // Không throw lại lỗi ở đây — chỉ log ra, để server tiếp tục sống
 });
 
-pool.connect()
+pool.query('SELECT NOW()')
   .then(() => console.log('✅ Đã kết nối thành công với cơ sở dữ liệu PostgreSQL!'))
   .catch((err) => console.error('❌ Lỗi kết nối CSDL:', err.message));
 
