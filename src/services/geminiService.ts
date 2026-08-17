@@ -138,3 +138,27 @@ ${rawText}
     throw error;
   }
 }
+export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File) => {
+  // Lấy API model (tương tự như hàm parseFullExamWithGemini)
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
+
+  // Chuyển đổi Buffer của file sang dạng Base64 để Gemini đọc được
+  const fileData = {
+    inlineData: {
+      data: file.buffer.toString("base64"),
+      mimeType: file.mimetype,
+    },
+  };
+
+  const prompt = `Bạn là một chuyên gia giáo dục. Hãy đọc file đề thi đính kèm và bóc tách dữ liệu theo đúng định dạng JSON 3 phần (Trắc nghiệm nhiều lựa chọn, Đúng/Sai, Trả lời ngắn). Trả về duy nhất một chuỗi JSON hợp lệ, không kèm văn bản giải thích. Cấu trúc JSON bắt buộc: { "part1": [...], "part2": [...], "part3": [...] }`;
+
+  // Gửi cả Prompt và File cho AI
+  const result = await model.generateContent([prompt, fileData]);
+  const response = await result.response;
+  let text = response.text();
+
+  // Xóa các ký tự markdown JSON dư thừa (nếu có)
+  text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+  return JSON.parse(text);
+};

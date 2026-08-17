@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 // 👇 Nhập hàm gọi Gemini từ service bạn vừa tạo
 import { parseFullExamWithGemini } from '../services/geminiService';
 
+
 // ========================================================
 // 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀO DATABASE
 // ========================================================
@@ -263,22 +264,45 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
             return;
         }
 
-        console.log('--- ĐÃ NHẬN ĐƯỢC FILE TỪ FRONTEND ---');
-        console.log('Tên file:', file.originalname);
-        console.log('Dung lượng:', file.size, 'bytes');
-        console.log('Định dạng:', file.mimetype);
-        console.log('-------------------------------------');
+        console.log('--- ĐANG GỬI FILE CHO GEMINI AI XỬ LÝ ---');
 
-        // TODO: Gửi file.buffer này cho AI Gemini xử lý (Chúng ta sẽ làm ở bước tiếp theo)
+        // 1. Gửi file cho Gemini xử lý
+        const fullExam = await parseFullExamFromFileWithGemini(file);
 
+        // 2. Trích xuất đáp án đúng của từng phần
+        const part1Key = fullExam.part1.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+        const part2Key = fullExam.part2.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+        const part3Key = fullExam.part3.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+
+        // 3. Tự động lưu đáp án chuẩn vào Database
+        const checkExist = await pool.query('SELECT id FROM exam_keys WHERE document_id = $1', [document_id]);
+
+        let result;
+        if (checkExist.rows.length > 0) {
+            result = await pool.query(
+                `UPDATE exam_keys 
+                 SET part1_key = $1, part2_key = $2, part3_key = $3, duration_minutes = $4
+                 WHERE document_id = $5 RETURNING *`,
+                [JSON.stringify(part1Key), JSON.stringify(part2Key), JSON.stringify(part3Key), durationMinutes || 50, document_id]
+            );
+        } else {
+            result = await pool.query(
+                `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, duration_minutes, allow_view_answers)
+                 VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING *`,
+                [document_id, class_id, JSON.stringify(part1Key), JSON.stringify(part2Key), JSON.stringify(part3Key), durationMinutes || 50]
+            );
+        }
+
+        console.log('--- XỬ LÝ FILE HOÀN TẤT ---');
+
+        // 4. Trả về kết quả cho Frontend hiển thị
         res.status(200).json({ 
-            message: 'Đã nhận file thành công! Chuẩn bị gọi AI...',
-            // Tạm thời trả về data rỗng để Frontend không bị lỗi hiển thị Preview
-            examKey: { part1_key: {}, part2_key: {}, part3_key: {} },
-            examContent: { part1: [], part2: [], part3: [] }
+            message: 'Phân tích file bằng AI thành công!',
+            examKey: result.rows[0],
+            examContent: fullExam
         });
     } catch (error: any) {
-        console.error('Lỗi nhận file:', error);
-        res.status(500).json({ message: 'Lỗi server khi nhận file', detail: error.message });
+        console.error('Lỗi nhận và xử lý file:', error);
+        res.status(500).json({ message: 'Lỗi server khi AI xử lý file', detail: error.message });
     }
 };
