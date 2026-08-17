@@ -154,7 +154,7 @@ export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File)
 
     // Gọi SDK mới, truyền cả văn bản và file dưới dạng Base64
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.7-flash',
       contents: [
         prompt,
         {
