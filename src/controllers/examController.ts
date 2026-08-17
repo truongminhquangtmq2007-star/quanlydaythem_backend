@@ -267,7 +267,7 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
         console.log('--- ĐANG GỬI FILE CHO GEMINI AI XỬ LÝ ---');
 
         // 1. Gửi file cho Gemini xử lý
-        const fullExam = await parseFullExamFromFileWithGemini(file);
+        const fullExam = await parseFullExamWithGemini(file);
 
         // 2. Trích xuất đáp án đúng của từng phần
         const part1Key = fullExam.part1.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
