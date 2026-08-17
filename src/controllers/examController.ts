@@ -2,8 +2,7 @@ import { Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
 // 👇 Nhập hàm gọi Gemini từ service bạn vừa tạo
-import { parseFullExamWithGemini } from '../services/geminiService';
-
+import { parseFullExamFromFileWithGemini } from '../services/geminiService';
 
 // ========================================================
 // 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀO DATABASE
@@ -184,7 +183,7 @@ export const createExamFromText = async (req: AuthRequest, res: Response): Promi
   
     try {
       // 1. Gửi văn bản cho Gemini xử lý
-      const fullExam = await parseFullExamWithGemini(rawText);
+      const fullExam = await parseFullExamFromFileWithGemini(rawText);
   
       // 2. Trích xuất đáp án đúng của từng phần
       const part1Key = fullExam.part1.reduce((acc: any, q: any) => {
@@ -267,7 +266,7 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
         console.log('--- ĐANG GỬI FILE CHO GEMINI AI XỬ LÝ ---');
 
         // 1. Gửi file cho Gemini xử lý
-        const fullExam = await parseFullExamWithGemini(file);
+        const fullExam = await parseFullExamFromFileWithGemini(file);
 
         // 2. Trích xuất đáp án đúng của từng phần
         const part1Key = fullExam.part1.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
