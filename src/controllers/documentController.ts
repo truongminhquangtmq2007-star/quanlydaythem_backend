@@ -1,12 +1,14 @@
 import { Request, Response } from 'express';
 import pool from '../db'; // Đảm bảo đường dẫn đến file db.ts là chính xác
 
-// API: Tải tài liệu lên
+// ==========================================
+// API 1: TẢI TÀI LIỆU/ẢNH LÊN
+// ==========================================
 export const uploadDocument = async (req: Request, res: Response): Promise<void> => {
   try {
     const { title, category, folder_id } = req.body;
     
-    // Khi dùng thư viện Multer + Cloudinary, link file sẽ nằm ở req.file.path
+    // Khi dùng thư viện Multer + Cloudinary, link file sẽ tự động nằm ở req.file.path
     const file_url = req.file?.path;
 
     if (!file_url) {
@@ -17,7 +19,7 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
     // Xử lý folder_id: Nếu không có (thư mục gốc) thì set là null
     const parentFolderId = folder_id ? parseInt(folder_id) : null;
 
-    // Lưu vào Database (Bảng documents)
+    // Lưu link ảnh/tài liệu vào Database (Bảng documents)
     const newDoc = await pool.query(
       `INSERT INTO documents (title, file_url, category, folder_id, uploaded_at) 
        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP) 
@@ -25,9 +27,10 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
       [title, file_url, category || 'STORAGE', parentFolderId]
     );
 
+    // Dữ liệu JSON trả về cho Frontend
     res.status(201).json({
       message: 'Tải tài liệu lên thành công!',
-      document: newDoc.rows[0]
+      document: newDoc.rows[0] 
     });
   } catch (error) {
     console.error("Lỗi khi tải tài liệu:", error);
@@ -35,7 +38,9 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
   }
 };
 
-// API: Xóa tài liệu
+// ==========================================
+// API 2: XÓA TÀI LIỆU
+// ==========================================
 export const deleteDocument = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
@@ -58,7 +63,9 @@ export const deleteDocument = async (req: Request, res: Response): Promise<void>
   }
 };
 
-// API: Lấy danh sách tài liệu (Phòng hờ nếu bạn cần dùng ở chỗ khác)
+// ==========================================
+// API 3: LẤY DANH SÁCH TÀI LIỆU
+// ==========================================
 export const getAllDocuments = async (req: Request, res: Response): Promise<void> => {
   try {
     const allDocs = await pool.query('SELECT * FROM documents ORDER BY uploaded_at DESC');

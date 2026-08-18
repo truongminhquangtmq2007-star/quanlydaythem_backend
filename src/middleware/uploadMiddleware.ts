@@ -5,27 +5,32 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Khởi tạo kết nối với Cloudinary bằng các khóa trong file .env
+// Khởi tạo kết nối với Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Cấu hình kho lưu trữ
-// Cấu hình kho lưu trữ
-const storage = new CloudinaryStorage({
+// ========================================================
+// 1. KHO LƯU CLOUDINARY (Dùng cho upload tài liệu, lưu ảnh câu hỏi)
+// ========================================================
+const cloudStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
     return {
       folder: 'tai_lieu_lms', 
       resource_type: 'auto', 
-      
-      // [ĐÃ SỬA]: Giữ nguyên file.originalname để không bị mất đuôi .xlsx, .docx
       public_id: `${Date.now()}-${file.originalname}` 
     };
   },
 });
+// Đổi tên thành uploadCloud để dễ phân biệt
+export const uploadCloud = multer({ storage: cloudStorage });
 
-// Xuất ra biến upload để dùng như một middleware chặn ở các Route
-export const upload = multer({ storage: storage });
+
+// ========================================================
+// 2. KHO LƯU RAM (Dùng RIÊNG cho Gemini AI bóc tách đề)
+// ========================================================
+const memoryStorage = multer.memoryStorage();
+export const uploadMemory = multer({ storage: memoryStorage });

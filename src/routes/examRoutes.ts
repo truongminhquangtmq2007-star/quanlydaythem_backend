@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import multer from 'multer'; // <-- Bổ sung multer
+import multer from 'multer';
 import { verifyToken } from '../middleware/authMiddleware';
 import { 
     saveAnswerKey, 
@@ -8,8 +8,9 @@ import {
     getMySubmissions, 
     getExamKey,
     createExamFromText,
-    parseExamFromFile // <-- Bổ sung hàm hứng file
+    parseExamFromFile
 } from '../controllers/examController';
+import { uploadMemory } from '../middleware/uploadMiddleware';
 
 const router = Router();
 
@@ -23,11 +24,10 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.post('/key', verifyToken, saveAnswerKey);
 
 // 2. Tự động bóc tách đề và tạo đáp án bằng AI (Text)
-router.post('/parse-ai', verifyToken, createExamFromText);
-
+// Sửa dòng này:
+router.post('/parse-ai-text', verifyToken, createExamFromText);
 // 3. Tự động bóc tách đề từ FILE (PDF/Ảnh)
-router.post('/parse-ai-file', verifyToken, upload.single('examFile'), parseExamFromFile);
-
+router.post('/parse-ai-file', verifyToken, uploadMemory.single('examFile'), parseExamFromFile);
 // 4. Lấy danh sách học sinh đã nộp bài của một đề
 router.get('/:document_id/submissions', verifyToken, getExamSubmissions);
 
