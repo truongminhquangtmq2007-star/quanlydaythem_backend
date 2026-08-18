@@ -111,12 +111,13 @@ Bạn là một giáo viên Toán học xuất sắc và chuyên gia số hóa �
 Nhiệm vụ: Phân tích nội dung đề thi và bóc tách thành đúng 3 phần theo chuẩn.
 
 YÊU CẦU BẮT BUỘC:
-1. LATEX: Mọi công thức Toán/Ký hiệu khoa học phải được chuyển thành định dạng LaTeX chuẩn (kẹp giữa dấu $, ví dụ: $f(x) = 9^x$).
-2. TỰ GIẢI TOÁN: Nếu đề thi KHÔNG CÓ CUNG CẤP ĐÁP ÁN, bạn BẮT BUỘC phải đóng vai giáo viên để TỰ GIẢI các bài toán đó và điền kết quả vào trường correctAnswer.
-3. FORMAT ĐÁP ÁN: 
+1. LATEX: Mọi công thức Toán/Ký hiệu khoa học, bảng biểu (array, matrix) TUYỆT ĐỐI KHÔNG được để trần trụi mà BẮT BUỘC phải bọc trong cặp dấu $ $ (Ví dụ: $\\frac{1}{2}$). 
+2. CÚ PHÁP LATEX TRONG JSON: Chỉ sử dụng MỘT dấu gạch chéo cho các lệnh LaTeX (ví dụ: \\frac, \\int). Tuyệt đối không dùng gạch chéo đôi (\\\\frac).
+3. TỰ GIẢI TOÁN: Nếu đề thi KHÔNG CÓ CUNG CẤP ĐÁP ÁN, bạn BẮT BUỘC phải đóng vai giáo viên để TỰ GIẢI các bài toán đó và điền kết quả vào trường correctAnswer.
+4. FORMAT ĐÁP ÁN: 
    - Phần 1: correctAnswer chỉ điền A, B, C, hoặc D.
    - Phần 2 (Đúng/Sai): correctAnswer của mỗi mệnh đề a, b, c, d BẮT BUỘC chỉ được điền chính xác một chữ cái "Đ" (nếu mệnh đề đó Đúng) hoặc "S" (nếu mệnh đề đó Sai). Tuyệt đối không điền chữ "Đúng", "Sai", "True", hay "False".
-4. Trả về định dạng JSON thuần túy theo đúng Schema quy định.
+5. Trả về định dạng JSON thuần túy theo đúng Schema quy định.
 
 Nội dung đề thi:
 ${rawText}
@@ -124,7 +125,7 @@ ${rawText}
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash', 
+      model: 'gemini-3.7-flash', // SỬ DỤNG BẢN CHUẨN ĐỂ KHÔNG BỊ LỖI 404
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -149,18 +150,18 @@ ${rawText}
 // ==========================================
 export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File): Promise<FullExamData> => {
   try {
-    // Ép AI tự giải toán và chuẩn hóa output Đ/S cực kỳ rõ ràng
     const prompt = `
 Bạn là một giáo viên Toán học xuất sắc và chuyên gia số hóa đề thi. Hãy đọc file đề thi đính kèm và bóc tách dữ liệu thành 3 phần. 
 
 YÊU CẦU ĐẶC BIỆT:
 1. Nếu đề bài không có sẵn đáp án cuối file, BẮT BUỘC bạn phải TỰ GIẢI toàn bộ các câu hỏi để tìm ra đáp án đúng.
 2. Đối với Phần 2 (Câu trắc nghiệm Đúng/Sai), ở mục correctAnswer của từng mệnh đề a, b, c, d, bạn BẮT BUỘC CHỈ ĐƯỢC ĐIỀN chữ "Đ" hoặc chữ "S". Tuyệt đối cấm điền các từ ngữ khác.
-3. Chuyển toàn bộ công thức sang định dạng LaTeX (kẹp giữa dấu $).
+3. TUYỆT ĐỐI KHÔNG để mã LaTeX trần trụi. MỌI công thức, phân số, hay bảng biểu (array, matrix) bắt buộc phải được bọc trong cặp dấu $ $ (Ví dụ: $\\frac{1}{2}$).
+4. Chỉ sử dụng MỘT dấu gạch chéo cho các lệnh LaTeX trong JSON (ví dụ: \\frac, \\int). Không được dùng gạch chéo đôi.
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash', // Dùng bản Pro để đọc ảnh/PDF và giải toán chính xác hơn
+      model: 'gemini-3.7-flash', // SỬ DỤNG BẢN CHUẨN ĐỂ KHÔNG BỊ LỖI 404
       contents: [
         prompt,
         {
