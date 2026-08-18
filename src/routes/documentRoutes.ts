@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { upload } from '../middleware/uploadMiddleware';
+import { uploadCloud as upload } from '../middleware/uploadMiddleware';
 import { verifyToken, AuthRequest } from '../middleware/authMiddleware'; // Import "Máy quét thẻ"
 import pool from '../db'; 
 
