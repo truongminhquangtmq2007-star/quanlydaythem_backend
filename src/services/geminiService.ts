@@ -220,6 +220,12 @@ YÊU CẦU BẮT BUỘC:
    - "questionIds" là danh sách các câu áp dụng (ví dụ: [4, 5, 6]).
    - "part" là phần chứa các câu đó ('part1', 'part2', hoặc 'part3').
    - KHÔNG lặp lại đoạn ngữ cảnh này vào "questionText" của từng câu con bên dưới nữa.
+   6. CẤM TUYỆT ĐỐI DÙNG BẢNG LATEX: KHÔNG được dùng \begin{array}, \begin{tabular}, \begin{matrix} 
+   hay bất kỳ môi trường bảng LaTeX nào. Nếu đề bài có bảng số liệu (ví dụ bảng tần số ghép nhóm), 
+   hãy trình bày lại nội dung bảng đó dưới dạng VĂN BẢN THƯỜNG, liệt kê từng khoảng và giá trị 
+   tương ứng theo định dạng: "Nhóm [8,10): tần số 4; Nhóm [10,12): tần số 5; ..." 
+   Chỉ dùng ký hiệu $ $ cho CÔNG THỨC TOÁN ĐƠN LẺ (phân số, căn, lũy thừa, tích phân...), 
+   tuyệt đối không dùng cho việc trình bày bảng.
 `;
 
 // ==========================================

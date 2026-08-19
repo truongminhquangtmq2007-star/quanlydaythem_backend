@@ -2,8 +2,10 @@ import { Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
 // 👇 Nhập hàm gọi Gemini từ service bạn vừa tạo
-import { parseFullExamFromFileWithGemini } from '../services/geminiService';
-
+import {
+    parseFullExamWithGemini,
+    parseFullExamFromFileWithGemini
+} from '../services/geminiService';
 // ========================================================
 // 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀ NỘI DUNG ĐỀ VÀO DATABASE
 // ========================================================
@@ -11,9 +13,38 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
     try {
         // NHẬN THÊM BIẾN exam_content TỪ FRONTEND
         const { document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content } = req.body;
+        const documentCheck = await pool.query(
+    'SELECT id FROM documents WHERE id = $1',
+    [document_id]
+);
 
-        const currentData = await pool.query('SELECT part1_key, part2_key, part3_key FROM exam_keys WHERE document_id = $1', [document_id]);
-        const old = currentData.rows[0] || { part1_key: {}, part2_key: {}, part3_key: {} };
+if (documentCheck.rows.length === 0) {
+    res.status(400).json({
+        message: `Tài liệu có ID ${document_id} không tồn tại`
+    });
+    return;
+}     
+const currentData = await pool.query(
+    `SELECT 
+        part1_key,
+        part2_key,
+        part3_key,
+        exam_content,
+        allow_view_answers,
+        duration_minutes
+     FROM exam_keys
+     WHERE document_id = $1`,
+    [document_id]
+);        const old = currentData.rows[0] || {
+    part1_key: {},
+    part2_key: {},
+    part3_key: {},
+    exam_content: null
+};
+const finalExamContent =
+    exam_content !== undefined
+        ? exam_content
+        : old.exam_content;
 
         const p1 = part1_key && Object.keys(part1_key).length > 0 ? part1_key : old.part1_key;
         const p2 = part2_key && Object.keys(part2_key).length > 0 ? part2_key : old.part2_key;
@@ -28,7 +59,16 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
                 part1_key = $3, part2_key = $4, part3_key = $5,
                 allow_view_answers = $6, duration_minutes = $7, exam_content = $8
              RETURNING *`,
-            [document_id, class_id, p1, p2, p3, allow_view_answers, duration_minutes, exam_content]
+            [
+    document_id,
+    class_id,
+    p1,
+    p2,
+    p3,
+    allow_view_answers,
+    duration_minutes,
+    finalExamContent
+]
         );
 
         res.status(200).json({ message: 'Lưu đề thi và đáp án thành công!' });
@@ -36,6 +76,12 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
         console.error('LỖI LƯU ĐÁP ÁN VÀ NỘI DUNG ĐỀ:', error);
         res.status(500).json({ message: 'Lỗi server', detail: (error as Error).message });
     }
+};
+const normalizeShortAnswer = (value: any): string => {
+    return String(value ?? '')
+        .trim()
+        .replace(/\s+/g, '')
+        .replace(',', '.');
 };
 // ========================================================
 // 2. API HỌC SINH: NỘP BÀI VÀ CHẤM ĐIỂM TỰ ĐỘNG
@@ -79,14 +125,43 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
             }
         }
 
-        if (student_answers.part3) {
-            for (const [q, ans] of Object.entries(student_answers.part3)) {
-                const studentVal = String(ans).trim();
-                const keyVal = String(answerKey.part3_key[q]).trim();
-                
-                if (studentVal === keyVal && studentVal !== '') p3Score += 0.5;
-            }
+        // ========================================================
+// CHẤM ĐIỂM PHẦN 3 - TỰ ĐỘNG THEO SỐ CÂU PHẦN 1
+// ========================================================
+
+// Đếm tổng số câu trắc nghiệm Phần 1
+const part1QuestionCount = Object.keys(answerKey.part1_key || {}).length;
+
+// Mặc định mỗi câu trả lời ngắn là 0.5 điểm
+let part3PointPerQuestion = 0.5;
+
+// Nếu Phần 1 có từ 18 câu trở lên thì mỗi câu Phần 3 là 0.25 điểm
+if (part1QuestionCount >= 18) {
+    part3PointPerQuestion = 0.25;
+}
+
+console.log('Số câu Phần 1:', part1QuestionCount);
+console.log('Điểm mỗi câu Phần 3:', part3PointPerQuestion);
+
+if (student_answers.part3) {
+    for (const [q, ans] of Object.entries(student_answers.part3)) {
+        const studentVal = normalizeShortAnswer(ans);
+
+        // Kiểm tra đáp án có tồn tại trước
+        const correctAnswer = answerKey.part3_key?.[q];
+
+        if (correctAnswer === undefined || correctAnswer === null) {
+            continue;
         }
+
+        const keyVal = normalizeShortAnswer(correctAnswer);
+
+        // Đúng đáp án và không được để trống
+        if (studentVal === keyVal && studentVal !== '') {
+            p3Score += part3PointPerQuestion;
+        }
+    }
+}
 
         const totalScore = p1Score + p2Score + p3Score;
 
@@ -139,12 +214,23 @@ export const getMySubmissions = async (req: AuthRequest, res: Response): Promise
     try {
         const studentId = req.user?.id;
         const result = await pool.query(
-            `SELECT document_id, total_score, submitted_at, time_taken_seconds 
-             FROM exam_submissions 
-             WHERE student_id = $1 
-             ORDER BY submitted_at ASC`,
-            [studentId]
-        );
+    `SELECT 
+        es.id,
+        es.document_id,
+        d.title,
+        es.total_score,
+        es.part1_score,
+        es.part2_score,
+        es.part3_score,
+        es.cheat_count,
+        es.submitted_at,
+        es.time_taken_seconds
+     FROM exam_submissions es
+     LEFT JOIN documents d ON d.id = es.document_id
+     WHERE es.student_id = $1
+     ORDER BY es.submitted_at DESC`,
+    [studentId]
+);
         res.status(200).json(result.rows);
     } catch (error) {
         console.error('Lỗi lấy điểm cá nhân:', error);
@@ -185,8 +271,7 @@ export const createExamFromText = async (req: AuthRequest, res: Response): Promi
   
     try {
       // 1. Gửi văn bản cho Gemini xử lý (Đã sửa lại gọi đúng hàm Text)
-      const fullExam = await  parseFullExamFromFileWithGemini(rawText);
-  
+    const fullExam = await parseFullExamWithGemini(rawText);  
       // 2. Trích xuất đáp án đúng của từng phần
       const part1Key = fullExam.part1.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
       const part2Key = fullExam.part2.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
