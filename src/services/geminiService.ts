@@ -234,8 +234,10 @@ YÊU CẦU BẮT BUỘC:
 // 1. HÀM GỌI GEMINI XỬ LÝ VĂN BẢN (TEXT)
 // ==========================================
 export async function parseFullExamWithGemini(rawText: string): Promise<FullExamData> {
+  const contents = `${basePrompt}\n\nNội dung đề thi:\n${rawText}`;
+
   try {
-    const text = await callGeminiWithRetry(`${basePrompt}\n\nNội dung đề thi:\n${rawText}`);
+    const text = await callGeminiWithRetry(contents);
     const examData: FullExamData = JSON.parse(text);
     return examData;
   } catch (error) {
@@ -259,9 +261,9 @@ export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File)
   ];
 
   try {
-    const text = await callGeminiWithRetry(`${basePrompt}\n\nNội dung đề thi:\n${rawText}`);
-const examData: FullExamData = JSON.parse(text);
-return examData;
+    const text = await callGeminiWithRetry(contents);
+    const examData: FullExamData = JSON.parse(text);
+    return examData;
   } catch (error) {
     console.error('Lỗi khi bóc tách file với Gemini:', error);
     throw error;
