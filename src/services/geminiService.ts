@@ -212,8 +212,10 @@ Nhiệm vụ: Bóc tách dữ liệu đề thi thành 3 phần.
 YÊU CẦU BẮT BUỘC:
 1. TỰ GIẢI TOÁN: Nếu đề bài không có sẵn đáp án cuối file, BẮT BUỘC bạn phải TỰ GIẢI toàn bộ các câu hỏi để tìm ra đáp án đúng điền vào 'correctAnswer'.
 2. LATEX: Mọi công thức Toán/Ký hiệu khoa học, bảng biểu (array, matrix) TUYỆT ĐỐI KHÔNG được để trần trụi mà BẮT BUỘC phải bọc trong cặp dấu $ $ (Ví dụ: $\\frac{1}{2}$). 
-3. CÚ PHÁP LATEX TRONG JSON: Chỉ sử dụng MỘT dấu gạch chéo cho các lệnh LaTeX (ví dụ: \\frac, \\int). Tuyệt đối không dùng gạch chéo đôi (\\\\frac).
-4. FORMAT ĐÁP ÁN: 
+3. CÚ PHÁP LATEX:
+   - Viết các lệnh LaTeX theo cú pháp chuẩn, ví dụ: \frac{1}{2}, \sqrt{x}, \overline{AB}, \vec{u}, \int.
+   - Không tự ý thay đổi hoặc loại bỏ dấu \ của các lệnh LaTeX.
+   - Hệ thống sẽ tự xử lý việc mã hóa chuỗi JSON, vì vậy chỉ cần tạo biểu thức LaTeX đúng cú pháp.4. FORMAT ĐÁP ÁN: 
    - Phần 1: correctAnswer chỉ điền A, B, C, hoặc D.
    - Phần 2 (Đúng/Sai): correctAnswer của mỗi mệnh đề a, b, c, d BẮT BUỘC chỉ được điền chính xác một chữ cái "Đ" (Đúng) hoặc "S" (Sai).
 5. NHẬN DIỆN CÂU HỎI NHÓM (CỰC KỲ QUAN TRỌNG): Nếu đề thi có các câu hỏi dùng chung một đoạn ngữ cảnh, bảng biểu hoặc dữ liệu (ví dụ: "Dựa vào thông tin sau, trả lời câu 4, 5, 6"), hãy tách riêng đoạn ngữ cảnh đó ra thành một phần tử trong mảng "sharedContexts". 
@@ -257,9 +259,9 @@ export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File)
   ];
 
   try {
-    const text = await callGeminiWithRetry(contents);
-    const examData: FullExamData = JSON.parse(text);
-    return examData;
+    const text = await callGeminiWithRetry(`${basePrompt}\n\nNội dung đề thi:\n${rawText}`);
+const examData: FullExamData = JSON.parse(text);
+return examData;
   } catch (error) {
     console.error('Lỗi khi bóc tách file với Gemini:', error);
     throw error;
