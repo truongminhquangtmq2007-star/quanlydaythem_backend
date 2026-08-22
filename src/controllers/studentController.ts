@@ -53,7 +53,7 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
 
   try {
     const result = await pool.query(
-      `INSERT INTO students (student_code, full_name, phone, parent_phone, school, grade, current_level) 
+      `INSERT INTO students (student_code, full_name, phone_number, parent_phone, school, grade, current_level) 
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       [student_code, full_name, phoneToUse, parent_phone, school, grade, current_level]
     );
@@ -102,7 +102,7 @@ export const getProfile360 = async (req: Request, res: Response): Promise<void> 
   const { id } = req.params;
   try {
     // 1. Thông tin cá nhân
-    const studentRes = await pool.query('SELECT id, full_name, phone, parent_phone, school, grade, current_level, status, learning_goals FROM students WHERE id = $1', [id]);
+    const studentRes = await pool.query('SELECT id, full_name, phone_number AS phone, parent_phone, school, grade, current_level, status, learning_goals FROM students WHERE id = $1', [id]);
     if (studentRes.rows.length === 0) {
       res.status(404).json({ message: "Không tìm thấy học sinh" });
       return;
@@ -163,7 +163,7 @@ export const updateStudent = async (req: AuthRequest, res: Response): Promise<vo
   const { full_name, phone, parent_phone, school, grade, current_level } = req.body; 
   try {
     const result = await pool.query(
-      'UPDATE students SET full_name = $1, phone = $2, parent_phone = $3, school = $4, grade = $5, current_level = $6 WHERE id = $7 RETURNING *',
+      'UPDATE students SET full_name = $1, phone_number = $2, parent_phone = $3, school = $4, grade = $5, current_level = $6 WHERE id = $7 RETURNING *',
       [full_name, phone, parent_phone, school, grade, current_level, id]
     );
     res.status(200).json(result.rows[0]);
