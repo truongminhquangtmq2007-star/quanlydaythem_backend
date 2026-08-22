@@ -116,10 +116,10 @@ export const getProfile360 = async (req: Request, res: Response): Promise<void> 
 
     // 2. Danh sách lớp
     const classesRes = await pool.query(
-      `SELECT c.*, cm.enroll_date, cm.status as member_status 
-       FROM class_members cm 
-       JOIN classes c ON cm.class_id = c.id 
-       WHERE cm.student_id = $1`,
+      `SELECT c.*, e.enrollment_date as enroll_date, e.status as member_status 
+       FROM enrollments e 
+       JOIN classes c ON e.class_id = c.id 
+       WHERE e.student_id = $1`,
       [id]
     );
 

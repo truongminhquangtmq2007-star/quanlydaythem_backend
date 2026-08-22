@@ -148,6 +148,7 @@ export const getClassSessions = async (req: Request, res: Response): Promise<voi
       `SELECT * FROM sessions WHERE class_id = $1 ORDER BY session_date DESC`,
       [id]
     );
+    console.log(`[getClassSessions] class_id=${id}, result length=${result.rows.length}`);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ message: "Lỗi server" });
