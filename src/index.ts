@@ -30,7 +30,7 @@ const app = express();
 
 // Bật CORS đầy đủ cấu hình
 app.use(cors({
-  origin: '*',
+  origin: 'https://quanlydaythem-frontend-dun.vercel.app',
   credentials: true
 }));
 
