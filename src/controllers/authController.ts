@@ -90,10 +90,14 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
   const identifier = req.body.identifier || req.body.username;
   const password = req.body.password;
   try {
-    const result = await pool.query(
-      "SELECT id, username, password_hash, full_name, student_id, title FROM users WHERE (username = $1 OR phone_number = $1) AND role = 'STUDENT'",
-      [identifier]
-    );
+    const query = `
+      SELECT u.id, u.username, u.password_hash, u.full_name, u.student_id, u.title 
+      FROM users u
+      LEFT JOIN students s ON u.student_id = s.id
+      WHERE (u.username = $1 OR s.phone_number = $1) AND u.role = 'STUDENT'
+    `;
+    console.log("Executing SQL Query:", query, "Params:", [identifier]);
+    const result = await pool.query(query, [identifier]);
     const user = result.rows[0];
     if (!user) {
       res.status(400).json({ message: 'Tài khoản không tồn tại!' });
