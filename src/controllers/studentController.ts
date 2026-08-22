@@ -15,7 +15,7 @@ export interface AuthRequest extends Request {
 export const getStudents = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { search, grade } = req.query;
-    let query = 'SELECT * FROM students WHERE 1=1';
+    let query = 'SELECT * FROM students WHERE (is_active = TRUE OR is_active IS NULL)';
     const values: any[] = [];
     let count = 1;
 
@@ -175,8 +175,11 @@ export const updateStudent = async (req: AuthRequest, res: Response): Promise<vo
 export const deleteStudent = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    await pool.query('DELETE FROM students WHERE id = $1', [id]);
-    res.status(200).json({ message: "Đã xóa học sinh thành công" });
+    try { await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE'); } catch(e){}
+    try { await pool.query('UPDATE students SET is_active = TRUE WHERE is_active IS NULL'); } catch(e){}
+
+    await pool.query('UPDATE students SET is_active = FALSE WHERE id = $1', [id]);
+    res.status(200).json({ message: "Đã xóa (ẩn) học sinh thành công" });
   } catch (error) {
     res.status(500).json({ message: "Lỗi máy chủ nội bộ" });
   }

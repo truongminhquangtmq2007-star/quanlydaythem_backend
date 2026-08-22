@@ -44,6 +44,11 @@ router.get('/key/:document_id', verifyToken, getExamKey);
 // ==========================================
 // ROUTES CHO HỌC SINH
 // ==========================================
+// Lưu nháp và lấy nháp
+import { getDraftExam, saveDraftExam } from '../controllers/examController';
+router.get('/:id/draft', verifyToken, getDraftExam);
+router.post('/:id/draft', verifyToken, saveDraftExam);
+
 // 6. Nộp bài trắc nghiệm và chấm điểm tự động
 router.post('/:id/submit', verifyToken, submitExam);
 router.post('/submit', verifyToken, submitExam);

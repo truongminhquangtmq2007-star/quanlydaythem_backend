@@ -13,10 +13,10 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
 
     let result;
     if (user.role === 'ADMIN') {
-      result = await pool.query('SELECT * FROM classes ORDER BY id DESC');
+      result = await pool.query('SELECT * FROM classes WHERE is_active = TRUE OR is_active IS NULL ORDER BY id DESC');
     } else {
       result = await pool.query(
-        'SELECT * FROM classes WHERE teacher_id = $1 ORDER BY id DESC', 
+        'SELECT * FROM classes WHERE teacher_id = $1 AND (is_active = TRUE OR is_active IS NULL) ORDER BY id DESC', 
         [user.id]
       );
     }
@@ -87,21 +87,15 @@ export const updateClass = async (req: AuthRequest, res: Response): Promise<void
 export const deleteClass = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    // Xoá các dữ liệu liên quan để tránh lỗi Foreign Key
-    await pool.query('DELETE FROM class_members WHERE class_id = $1', [id]);
-    await pool.query('DELETE FROM attendance WHERE session_id IN (SELECT id FROM sessions WHERE class_id = $1)', [id]);
-    await pool.query('DELETE FROM sessions WHERE class_id = $1', [id]);
-    // Nếu có bảng schedules
-    try { await pool.query('DELETE FROM schedules WHERE class_id = $1', [id]); } catch(e){}
-    // Nếu có bảng class_sessions
-    try { await pool.query('DELETE FROM class_sessions WHERE class_id = $1', [id]); } catch(e){}
+    try { await pool.query('ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE'); } catch(e){}
+    try { await pool.query('UPDATE classes SET is_active = TRUE WHERE is_active IS NULL'); } catch(e){}
 
-    const result = await pool.query('DELETE FROM classes WHERE id = $1 RETURNING *', [id]);
+    const result = await pool.query('UPDATE classes SET is_active = FALSE WHERE id = $1 RETURNING *', [id]);
     if (result.rows.length === 0) {
       res.status(404).json({ message: "Không tìm thấy lớp học" });
       return;
     }
-    res.status(200).json({ message: "Đã xóa lớp học thành công" });
+    res.status(200).json({ message: "Đã xóa (ẩn) lớp học thành công" });
   } catch (error: any) {
     console.error('Lỗi xóa lớp:', error);
     res.status(500).json({ message: "Lỗi máy chủ nội bộ", details: error.message });

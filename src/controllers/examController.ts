@@ -166,6 +166,88 @@ const normalizeShortAnswer = (value: any): string => {
 };
 
 // ========================================================
+// 1B. API HỌC SINH: LƯU NHÁP VÀ KHÔI PHỤC (AUTO-SAVE)
+// ========================================================
+const ensureExamSubmissionsTable = async () => {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS exam_submissions (
+            id SERIAL PRIMARY KEY,
+            document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+            exam_id INTEGER,
+            student_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            student_answers JSONB,
+            total_score NUMERIC(5,2),
+            part1_score NUMERIC(5,2) DEFAULT 0,
+            part2_score NUMERIC(5,2) DEFAULT 0,
+            part3_score NUMERIC(5,2) DEFAULT 0,
+            cheat_count INTEGER DEFAULT 0,
+            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            time_taken_seconds INTEGER DEFAULT 0,
+            detailed_results JSONB
+        );
+    `);
+    try { await pool.query(`ALTER TABLE exam_submissions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'COMPLETED';`); } catch(e){}
+    try { await pool.query(`ALTER TABLE exam_submissions ADD COLUMN IF NOT EXISTS last_saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`); } catch(e){}
+    try { await pool.query(`ALTER TABLE exam_submissions ADD COLUMN IF NOT EXISTS time_taken_seconds INTEGER DEFAULT 0;`); } catch(e){}
+    try { await pool.query(`ALTER TABLE exam_submissions ADD COLUMN IF NOT EXISTS detailed_results JSONB;`); } catch(e){}
+    try { await pool.query(`ALTER TABLE exam_submissions ADD COLUMN IF NOT EXISTS exam_id INTEGER;`); } catch(e){}
+};
+
+export const getDraftExam = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const studentId = req.user?.id;
+        const examId = req.params.id;
+        await ensureExamSubmissionsTable();
+
+        const result = await pool.query(
+            `SELECT student_answers, last_saved_at, time_taken_seconds FROM exam_submissions 
+             WHERE student_id = $1 AND (document_id = $2 OR exam_id = $2) AND status = 'IN_PROGRESS'`,
+            [studentId, examId]
+        );
+
+        if (result.rows.length > 0) {
+            res.status(200).json({ draft: result.rows[0] });
+        } else {
+            res.status(200).json({ draft: null });
+        }
+    } catch (error) {
+        console.error('Lỗi lấy bản nháp:', error);
+        res.status(500).json({ message: 'Lỗi server' });
+    }
+};
+
+export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const studentId = req.user?.id;
+        const examId = req.params.id;
+        const { answers, time_taken_seconds } = req.body;
+        await ensureExamSubmissionsTable();
+
+        const exist = await pool.query(
+            `SELECT id FROM exam_submissions WHERE student_id = $1 AND (document_id = $2 OR exam_id = $2) AND status = 'IN_PROGRESS'`,
+            [studentId, examId]
+        );
+
+        if (exist.rows.length > 0) {
+            await pool.query(
+                `UPDATE exam_submissions SET student_answers = $1, time_taken_seconds = $2, last_saved_at = NOW() WHERE id = $3`,
+                [JSON.stringify(answers), time_taken_seconds || 0, exist.rows[0].id]
+            );
+        } else {
+            await pool.query(
+                `INSERT INTO exam_submissions (document_id, exam_id, student_id, student_answers, time_taken_seconds, status, last_saved_at) 
+                 VALUES ($1, $1, $2, $3, $4, 'IN_PROGRESS', NOW())`,
+                [examId, studentId, JSON.stringify(answers), time_taken_seconds || 0]
+            );
+        }
+        res.status(200).json({ message: 'Đã lưu nháp' });
+    } catch (error) {
+        console.error('Lỗi lưu bản nháp:', error);
+        res.status(500).json({ message: 'Lỗi server' });
+    }
+};
+
+// ========================================================
 // 2. API HỌC SINH: NỘP BÀI VÀ CHẤM ĐIỂM TỰ ĐỘNG (AUTO-GRADING)
 // ========================================================
 export const submitExam = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -411,24 +493,28 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
         };
 
         // Lưu kết quả nộp bài vào bảng exam_submissions
-        const submitResult = await pool.query(
-            `INSERT INTO exam_submissions 
-            (document_id, exam_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, detailed_results) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-            [
-                examId,
-                examId,
-                studentId,
-                normalizedAnswersPayload,
-                totalScore,
-                roundedP1Score,
-                roundedP2Score,
-                roundedP3Score,
-                cheatCountNum,
-                timeTakenNum,
-                JSON.stringify(details)
-            ]
+        const existDraft = await pool.query(
+            `SELECT id FROM exam_submissions WHERE student_id = $1 AND (document_id = $2 OR exam_id = $2) AND status = 'IN_PROGRESS'`,
+            [studentId, examId]
         );
+
+        let submitResult;
+        if (existDraft.rows.length > 0) {
+            submitResult = await pool.query(
+                `UPDATE exam_submissions 
+                 SET student_answers = $1, total_score = $2, part1_score = $3, part2_score = $4, part3_score = $5, 
+                     cheat_count = $6, time_taken_seconds = $7, detailed_results = $8, status = 'COMPLETED', submitted_at = NOW()
+                 WHERE id = $9 RETURNING *`,
+                [normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details), existDraft.rows[0].id]
+            );
+        } else {
+            submitResult = await pool.query(
+                `INSERT INTO exam_submissions 
+                (document_id, exam_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, detailed_results, status) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'COMPLETED') RETURNING *`,
+                [examId, examId, studentId, normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details)]
+            );
+        }
 
         // ========================================================
         // PHASE 5: TÍNH TOÁN HIỆU SUẤT THEO CHUYÊN ĐỀ (ANALYTICS)
