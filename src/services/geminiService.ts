@@ -162,10 +162,10 @@ const examResponseSchema = {
 // CƠ CHẾ TỰ ĐỘNG THỬ LẠI (RETRY) KHI GEMINI QUÁ TẢI
 // ==========================================
 const MODEL_FALLBACK_CHAIN = [
-  'gemini-3.1-pro',
-  'gemini-3.5-flash',
-  'gemini-3.7-flash',
-  'gemini-flash-latest',
+  'gemini-2.5-pro',         // Mạnh nhất, chính xác nhất cho bóc tách đề thi
+  'gemini-2.5-flash',       // Nhanh, thông minh, hỗ trợ JSON schema
+  'gemini-3.5-flash',       // Thế hệ mới nhất
+  'gemini-3.1-flash-lite',  // Dự phòng nhẹ nhất, ít bị quá tải
 ];
 
 const MAX_RETRIES_PER_MODEL = 3;

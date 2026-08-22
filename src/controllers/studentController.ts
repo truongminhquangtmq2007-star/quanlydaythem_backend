@@ -102,7 +102,7 @@ export const getProfile360 = async (req: Request, res: Response): Promise<void> 
   const { id } = req.params;
   try {
     // 1. Thông tin cá nhân
-    const studentRes = await pool.query('SELECT id, student_code, full_name, phone, parent_phone, school, grade, current_level, status, learning_goals FROM students WHERE id = $1', [id]);
+    const studentRes = await pool.query('SELECT id, full_name, phone, parent_phone, school, grade, current_level, status, learning_goals FROM students WHERE id = $1', [id]);
     if (studentRes.rows.length === 0) {
       res.status(404).json({ message: "Không tìm thấy học sinh" });
       return;

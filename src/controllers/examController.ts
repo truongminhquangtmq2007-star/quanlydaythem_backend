@@ -522,7 +522,6 @@ export const getExamSubmissions = async (req: AuthRequest, res: Response): Promi
             `SELECT 
                 es.id,
                 es.document_id,
-                es.exam_id,
                 es.student_id,
                 u.username as student_name,
                 es.total_score,
@@ -536,7 +535,7 @@ export const getExamSubmissions = async (req: AuthRequest, res: Response): Promi
                 es.time_taken_seconds
              FROM exam_submissions es 
              JOIN users u ON es.student_id = u.id 
-             WHERE es.document_id = $1 OR es.exam_id = $1 
+             WHERE es.document_id = $1 
              ORDER BY es.total_score DESC, es.submitted_at DESC`,
             [document_id]
         );

@@ -90,7 +90,7 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
   const { username, password } = req.body; // Frontend gọi "username" nhưng có thể là email
   try {
     const result = await pool.query(
-      "SELECT id, email, username, password_hash, full_name, student_id, title FROM users WHERE (email = $1 OR username = $1) AND role = 'STUDENT'",
+      "SELECT id, username, password_hash, full_name, student_id, title FROM users WHERE username = $1 AND role = 'STUDENT'",
       [username]
     );
     const user = result.rows[0];
