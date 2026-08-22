@@ -661,13 +661,23 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
 
         console.log('--- XỬ LÝ FILE HOÀN TẤT ---');
 
+        // Ghi lưu Document vào thư viện
+        let actual_document_id = document_id;
+        if (!actual_document_id) {
+            const docRes = await pool.query(
+                `INSERT INTO documents (document_code, title, file_url, category, type) VALUES ($1, $2, $3, 'EXAM', 'EXAM') RETURNING id`,
+                [`EXAM${Date.now().toString().slice(-6)}`, file.originalname || 'Đề thi tự động tạo', file.path]
+            );
+            actual_document_id = docRes.rows[0].id;
+        }
+
         res.status(200).json({ 
             message: 'Phân tích file bằng AI thành công! Vui lòng kiểm tra và chỉnh sửa trước khi lưu.',
             examKey: {
                 part1_key: part1Key,
                 part2_key: part2Key,
                 part3_key: part3Key,
-                document_id: document_id,
+                document_id: actual_document_id,
                 class_id: class_id,
                 duration_minutes: durationMinutes || 50
             },

@@ -87,14 +87,24 @@ export const updateClass = async (req: AuthRequest, res: Response): Promise<void
 export const deleteClass = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    // Xoá các dữ liệu liên quan để tránh lỗi Foreign Key
+    await pool.query('DELETE FROM class_members WHERE class_id = $1', [id]);
+    await pool.query('DELETE FROM attendance WHERE session_id IN (SELECT id FROM sessions WHERE class_id = $1)', [id]);
+    await pool.query('DELETE FROM sessions WHERE class_id = $1', [id]);
+    // Nếu có bảng schedules
+    try { await pool.query('DELETE FROM schedules WHERE class_id = $1', [id]); } catch(e){}
+    // Nếu có bảng class_sessions
+    try { await pool.query('DELETE FROM class_sessions WHERE class_id = $1', [id]); } catch(e){}
+
     const result = await pool.query('DELETE FROM classes WHERE id = $1 RETURNING *', [id]);
     if (result.rows.length === 0) {
       res.status(404).json({ message: "Không tìm thấy lớp học" });
       return;
     }
     res.status(200).json({ message: "Đã xóa lớp học thành công" });
-  } catch (error) {
-    res.status(500).json({ message: "Lỗi máy chủ nội bộ" });
+  } catch (error: any) {
+    console.error('Lỗi xóa lớp:', error);
+    res.status(500).json({ message: "Lỗi máy chủ nội bộ", details: error.message });
   }
 };
 
