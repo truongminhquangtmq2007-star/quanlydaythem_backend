@@ -87,11 +87,12 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
 // Đăng nhập dành cho Học sinh 
 export const studentLogin = async (req: Request, res: Response): Promise<void> => {
-  const { username, password } = req.body; // Frontend gọi "username" nhưng có thể là email
+  const identifier = req.body.identifier || req.body.username;
+  const password = req.body.password;
   try {
     const result = await pool.query(
-      "SELECT id, username, password_hash, full_name, student_id, title FROM users WHERE username = $1 AND role = 'STUDENT'",
-      [username]
+      "SELECT id, username, password_hash, full_name, student_id, title FROM users WHERE (username = $1 OR phone_number = $1) AND role = 'STUDENT'",
+      [identifier]
     );
     const user = result.rows[0];
     if (!user) {
