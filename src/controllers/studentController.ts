@@ -62,11 +62,16 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
 
     // Tạo tài khoản đăng nhập cho học sinh (Role = 'STUDENT')
     try {
-      const email = `${student_code.toLowerCase()}@minhquang.edu.vn`;
-      const passwordHash = await bcrypt.hash(phoneToUse || '123456', 10);
+      const username = phoneToUse || student_code;
+      const email = `${username.toLowerCase()}@student.local`; // Cần cho DB schema cũ nếu email NOT NULL
+      const passwordHash = await bcrypt.hash('123456', 10);
+      
+      // Kiểm tra cột username trong users
+      try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255) UNIQUE;`); } catch(e){}
+
       await pool.query(
-        `INSERT INTO users (email, password_hash, role, full_name, student_id) VALUES ($1, $2, $3, $4, $5)`,
-        [email, passwordHash, 'STUDENT', full_name, student.id]
+        `INSERT INTO users (username, email, password_hash, role, full_name, student_id) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [username, email, passwordHash, 'STUDENT', full_name, student.id]
       );
     } catch (e) {
       console.log('Không thể tạo user tự động cho học sinh:', e);
@@ -197,5 +202,33 @@ export const updateStudentGoals = async (req: AuthRequest, res: Response): Promi
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Lỗi máy chủ nội bộ' });
+  }
+};
+
+export const resetStudentPassword = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const studentId = req.params.id;
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      res.status(400).json({ message: 'Mật khẩu mới không được để trống' });
+      return;
+    }
+
+    const passwordHash = await require('bcrypt').hash(newPassword, 10);
+    const result = await pool.query(
+      `UPDATE users SET password_hash = $1 WHERE student_id = $2 AND role = 'STUDENT' RETURNING id`,
+      [passwordHash, studentId]
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: 'Không tìm thấy tài khoản đăng nhập của học sinh này' });
+      return;
+    }
+
+    res.status(200).json({ message: 'Đổi mật khẩu học sinh thành công' });
+  } catch (error: any) {
+    console.error('Lỗi đổi mật khẩu học sinh:', error);
+    res.status(500).json({ message: 'Lỗi server' });
   }
 };
