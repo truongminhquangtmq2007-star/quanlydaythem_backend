@@ -3,6 +3,12 @@ import pool from '../db';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
+interface AuthRequest extends Request {
+  user?: {
+    id: number;
+    [key: string]: unknown;
+  };
+}
 
 
 export const login = async (req: Request, res: Response): Promise<void> => {
@@ -41,7 +47,9 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       user: {
         id: user.id,
         username: user.username,
-        role: user.role // Trả về role cho Frontend để hiển thị giao diện phù hợp
+        full_name: user.full_name,
+        role: user.role,
+        title: user.title
       }
     });
   } catch (error) {
@@ -77,26 +85,26 @@ export const register = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// Đăng nhập dành cho Học sinh (Giữ nguyên không đổi)
+// Đăng nhập dành cho Học sinh 
 export const studentLogin = async (req: Request, res: Response): Promise<void> => {
-  const { username, password } = req.body;
+  const { username, password } = req.body; // Frontend gọi "username" nhưng có thể là email
   try {
     const result = await pool.query(
-      'SELECT id, username, password, full_name FROM students WHERE username = $1',
+      "SELECT id, email, username, password_hash, full_name, student_id, title FROM users WHERE (email = $1 OR username = $1) AND role = 'STUDENT'",
       [username]
     );
-    const student = result.rows[0];
-    if (!student) {
+    const user = result.rows[0];
+    if (!user) {
       res.status(400).json({ message: 'Tài khoản không tồn tại!' });
       return;
     }
-    const isMatch = await bcrypt.compare(password, student.password);
+    const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
       res.status(400).json({ message: 'Sai mật khẩu!' });
       return;
     }
     const token = jwt.sign(
-      { id: student.id, role: 'student', full_name: student.full_name },
+      { id: user.id, role: 'STUDENT', full_name: user.full_name, student_id: user.student_id },
       process.env.JWT_SECRET as string,
       { expiresIn: '1d' }
     );
@@ -104,9 +112,11 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
       message: 'Đăng nhập thành công',
       token,
       user: {
-        id: student.id,
-        full_name: student.full_name,
-        role: 'student'
+        id: user.id,
+        full_name: user.full_name,
+        role: 'STUDENT',
+        student_id: user.student_id,
+        title: user.title
       }
     });
   } catch (error) {
@@ -175,5 +185,43 @@ export const resetTeacherPassword = async (req: Request, res: Response): Promise
   } catch (error) {
     console.error("Lỗi đổi mật khẩu:", error);
     res.status(500).json({ message: "Lỗi máy chủ khi đổi mật khẩu" });
+  }
+};
+
+export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ message: 'Chưa xác thực' });
+      return;
+    }
+    const result = await pool.query('SELECT id, username, full_name, role, title FROM users WHERE id = $1', [req.user.id]);
+    if (result.rows.length === 0) {
+      res.status(404).json({ message: 'Không tìm thấy người dùng' });
+      return;
+    }
+    res.status(200).json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+};
+
+export const updateProfile = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ message: 'Chưa xác thực' });
+      return;
+    }
+    const { full_name, title } = req.body;
+    const result = await pool.query(
+      'UPDATE users SET full_name = $1, title = $2 WHERE id = $3 RETURNING id, username, full_name, role, title',
+      [full_name, title, req.user.id]
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ message: 'Không tìm thấy người dùng' });
+      return;
+    }
+    res.status(200).json({ message: 'Cập nhật thành công', user: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: 'Lỗi server' });
   }
 };

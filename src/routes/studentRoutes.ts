@@ -1,15 +1,15 @@
 import { Router } from 'express';
-import { getStudents, createStudent, updateStudent, deleteStudent } from '../controllers/studentController';
-import { verifyToken } from '../middleware/authMiddleware';
-// Import bộ lọc vừa tạo
+import { getStudents, createStudent, updateStudent, deleteStudent, getProfile360, updateStudentGoals } from '../controllers/studentController';
+import { verifyToken, isAdmin } from '../middleware/authMiddleware';
 import { validateStudent } from '../validations/studentValidation';
 
 const router = Router();
 
-// Thêm validateStudent vào các API Thêm (POST) và Sửa (PUT)
 router.get('/', verifyToken, getStudents);
 router.post('/', verifyToken, validateStudent, createStudent);
+router.get('/:id/profile360', verifyToken, getProfile360);
 router.put('/:id', verifyToken, validateStudent, updateStudent);
-router.delete('/:id', verifyToken, deleteStudent);
+router.delete('/:id', verifyToken, isAdmin, deleteStudent);
+router.put('/:id/goals', verifyToken, updateStudentGoals);
 
 export default router;

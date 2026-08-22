@@ -2,136 +2,197 @@ import { Request, Response } from 'express';
 import pool from '../db';
 import bcrypt from 'bcrypt';
 
-// Khai báo thêm giao diện (interface) để TypeScript hiểu rằng
-// Request này có mang theo thông tin "user" (Thẻ từ đã được giải mã)
 export interface AuthRequest extends Request {
   user?: {
     id: number;
     username: string;
     role: string;
+    student_id?: number;
   };
 }
 
-// LẤY DANH SÁCH HỌC SINH (ĐÃ TÍCH HỢP BỘ LỌC PHÂN QUYỀN)
+// LẤY DANH SÁCH HỌC SINH (HỖ TRỢ SEARCH & LỌC KHỐI)
 export const getStudents = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const user = req.user;
-    if (!user) {
-      res.status(401).json({ message: "Không tìm thấy thông tin xác thực!" });
-      return;
+    const { search, grade } = req.query;
+    let query = 'SELECT * FROM students WHERE 1=1';
+    const values: any[] = [];
+    let count = 1;
+
+    if (search) {
+      query += ` AND full_name ILIKE $${count}`;
+      values.push(`%${search}%`);
+      count++;
     }
 
-    let result;
-    // Nếu là Giám đốc (ADMIN) -> Nhìn thấy toàn bộ
-    if (user.role === 'ADMIN') {
-      result = await pool.query('SELECT * FROM students ORDER BY created_at DESC');
-    } 
-    // Nếu là Giáo viên -> Chỉ lấy học sinh của mình
-    else {
-      result = await pool.query(
-        'SELECT * FROM students WHERE teacher_id = $1 ORDER BY created_at DESC', 
-        [user.id]
-      );
+    if (grade && grade !== 'ALL') {
+      query += ` AND grade = $${count}`;
+      values.push(grade);
+      count++;
     }
-    
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, values);
     res.status(200).json(result.rows);
   } catch (error) {
-    console.error("Lỗi khi lấy danh sách học sinh:", error);
+    console.error(error);
     res.status(500).json({ message: "Lỗi máy chủ nội bộ" });
   }
 };
 
-// THÊM HỌC SINH MỚI (GẮN CHẶT VỚI ID CỦA GIÁO VIÊN TẠO RA)
+// THÊM HỌC SINH MỚI
 export const createStudent = async (req: AuthRequest, res: Response): Promise<void> => {
-  const { full_name, phone_number } = req.body;
+  let { student_code, full_name, phone, parent_phone, school, grade, current_level, phone_number } = req.body;
   const user = req.user;
 
-  if (!user) {
-    res.status(401).json({ message: "Không tìm thấy thông tin xác thực!" });
-    return;
+  if (!student_code) {
+    student_code = 'HS' + Date.now().toString().slice(-6);
   }
+  const phoneToUse = phone || phone_number || '';
 
   try {
-    const username = phone_number; 
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash('123456', saltRounds);
-
-    // Lưu vào Database (Bơm thêm teacher_id chính là ID của người đang đăng nhập)
     const result = await pool.query(
-      `INSERT INTO students (full_name, phone_number, username, password, teacher_id) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING id, full_name, username`,
-      [full_name, phone_number, username, hashedPassword, user.id]
+      `INSERT INTO students (student_code, full_name, phone, parent_phone, school, grade, current_level) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [student_code, full_name, phoneToUse, parent_phone, school, grade, current_level]
     );
 
+    const student = result.rows[0];
+
+    // Tạo tài khoản đăng nhập cho học sinh (Role = 'STUDENT')
+    try {
+      const email = `${student_code.toLowerCase()}@minhquang.edu.vn`;
+      const passwordHash = await bcrypt.hash(phoneToUse || '123456', 10);
+      await pool.query(
+        `INSERT INTO users (email, password_hash, role, full_name, student_id) VALUES ($1, $2, $3, $4, $5)`,
+        [email, passwordHash, 'STUDENT', full_name, student.id]
+      );
+    } catch (e) {
+      console.log('Không thể tạo user tự động cho học sinh:', e);
+    }
+
     res.status(201).json({
-      message: 'Thêm học sinh và cấp tài khoản thành công',
-      student: result.rows[0]
+      message: 'Thêm học sinh thành công',
+      student: student
     });
   } catch (error: any) {
-    console.error("Lỗi khi thêm học sinh:", error);
-    if (error.code === '23505') {
-      res.status(400).json({ message: 'Số điện thoại này đã được sử dụng!' });
-      return;
+    // Fallback cho schema cũ nếu initCore.sql chưa được chạy hoàn chỉnh
+    try {
+      const username = phoneToUse || student_code;
+      const hashedPassword = await bcrypt.hash('123456', 10);
+      const fallback = await pool.query(
+        `INSERT INTO students (full_name, phone_number, username, password, teacher_id) 
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [full_name, phoneToUse, username, hashedPassword, user?.id || null]
+      );
+      res.status(201).json({
+        message: 'Thêm học sinh thành công (schema cũ)',
+        student: fallback.rows[0]
+      });
+    } catch(e) {
+      console.error(error, e);
+      res.status(500).json({ message: 'Lỗi server khi thêm học sinh' });
     }
-    res.status(500).json({ message: 'Lỗi server' });
   }
 };
 
-// SỬA THÔNG TIN HỌC SINH
-export const updateStudent = async (req: AuthRequest, res: Response): Promise<void> => {
+// HỒ SƠ 360°
+export const getProfile360 = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
   try {
-    const { id } = req.params; 
-    const { full_name, date_of_birth, phone_number, school_name, notes } = req.body; 
-    const user = req.user;
-
-    let result;
-    if (user?.role === 'ADMIN') {
-      // Admin sửa được tất cả
-      result = await pool.query(
-        'UPDATE students SET full_name = $1, date_of_birth = $2, phone_number = $3, school_name = $4, notes = $5 WHERE id = $6 RETURNING *',
-        [full_name, date_of_birth, phone_number, school_name, notes, id]
-      );
-    } else {
-      // Giáo viên chỉ sửa được học sinh của mình (Thêm điều kiện teacher_id = user.id)
-      result = await pool.query(
-        'UPDATE students SET full_name = $1, date_of_birth = $2, phone_number = $3, school_name = $4, notes = $5 WHERE id = $6 AND teacher_id = $7 RETURNING *',
-        [full_name, date_of_birth, phone_number, school_name, notes, id, user?.id]
-      );
-    }
-    
-    if (result.rows.length === 0) {
-      res.status(404).json({ message: "Không tìm thấy học sinh hoặc bạn không có quyền sửa" });
+    // 1. Thông tin cá nhân
+    const studentRes = await pool.query('SELECT id, student_code, full_name, phone, parent_phone, school, grade, current_level, status, learning_goals FROM students WHERE id = $1', [id]);
+    if (studentRes.rows.length === 0) {
+      res.status(404).json({ message: "Không tìm thấy học sinh" });
       return;
     }
-    
+    const student = studentRes.rows[0];
+
+    // 2. Danh sách lớp
+    const classesRes = await pool.query(
+      `SELECT c.*, cm.enroll_date, cm.status as member_status 
+       FROM class_members cm 
+       JOIN classes c ON cm.class_id = c.id 
+       WHERE cm.student_id = $1`,
+      [id]
+    );
+
+    // 3. Thống kê chuyên cần
+    const attendanceRes = await pool.query(
+      `SELECT status, COUNT(*) as count 
+       FROM attendance 
+       WHERE student_id = $1 
+       GROUP BY status`,
+      [id]
+    );
+
+    let total_sessions = 0;
+    let present = 0;
+    let late = 0;
+    let absent = 0;
+
+    attendanceRes.rows.forEach(row => {
+      const cnt = parseInt(row.count);
+      total_sessions += cnt;
+      if (row.status === 'PRESENT') present += cnt;
+      else if (row.status === 'LATE') late += cnt;
+      else if (row.status === 'ABSENT_EXCUSED' || row.status === 'ABSENT_UNEXCUSED') absent += cnt;
+    });
+
+    res.json({
+      profile: student,
+      classes: classesRes.rows,
+      attendance: {
+        total: total_sessions,
+        present,
+        late,
+        absent,
+        rate: total_sessions > 0 ? Math.round(((present + late) / total_sessions) * 100) : 0
+      }
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Lỗi server" });
+  }
+};
+
+export const updateStudent = async (req: AuthRequest, res: Response): Promise<void> => {
+  const { id } = req.params; 
+  const { full_name, phone, parent_phone, school, grade, current_level } = req.body; 
+  try {
+    const result = await pool.query(
+      'UPDATE students SET full_name = $1, phone = $2, parent_phone = $3, school = $4, grade = $5, current_level = $6 WHERE id = $7 RETURNING *',
+      [full_name, phone, parent_phone, school, grade, current_level, id]
+    );
     res.status(200).json(result.rows[0]);
   } catch (error) {
-    console.error("Lỗi khi cập nhật học sinh:", error);
     res.status(500).json({ message: "Lỗi máy chủ nội bộ" });
   }
 };
 
-// XÓA HỌC SINH
 export const deleteStudent = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const user = req.user;
-    
-    let result;
-    if (user?.role === 'ADMIN') {
-      result = await pool.query('DELETE FROM students WHERE id = $1 RETURNING *', [id]);
-    } else {
-      result = await pool.query('DELETE FROM students WHERE id = $1 AND teacher_id = $2 RETURNING *', [id, user?.id]);
-    }
-    
-    if (result.rows.length === 0) {
-      res.status(404).json({ message: "Không tìm thấy học sinh hoặc bạn không có quyền xóa" });
-      return;
-    }
-    
+    await pool.query('DELETE FROM students WHERE id = $1', [id]);
     res.status(200).json({ message: "Đã xóa học sinh thành công" });
   } catch (error) {
-    console.error("Lỗi khi xóa học sinh:", error);
     res.status(500).json({ message: "Lỗi máy chủ nội bộ" });
+  }
+};
+
+export const updateStudentGoals = async (req: AuthRequest, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const { learning_goals } = req.body;
+  try {
+    const result = await pool.query(
+      'UPDATE students SET learning_goals = $1 WHERE id = $2 RETURNING learning_goals',
+      [learning_goals, id]
+    );
+    res.status(200).json({ message: 'Cập nhật mục tiêu thành công', learning_goals: result.rows[0].learning_goals });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Lỗi máy chủ nội bộ' });
   }
 };

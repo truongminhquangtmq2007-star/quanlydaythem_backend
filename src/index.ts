@@ -14,6 +14,11 @@ import documentRoutes from './routes/documentRoutes';
 import folderRoutes from './routes/folderRoutes';
 import sessionRoutes from './routes/sessionRoutes';
 import examRoutes from './routes/examRoutes';
+import assignmentRoutes from './routes/assignmentRoutes';
+import analyticsRoutes from './routes/analyticsRoutes';
+import aiRoutes from './routes/aiRoutes';
+import reportRoutes from './routes/reportRoutes';
+import studentPortalRoutes from './routes/studentPortalRoutes';
 
 console.log("Danh sách các file đang có ở thư mục gốc:", fs.readdirSync(process.cwd()));
 console.log("Mật khẩu đọc được lúc này là:", process.env.DB_PASSWORD);
@@ -42,6 +47,11 @@ app.use('/api/folders', folderRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/bills', paymentRoutes); 
 app.use('/api/exams', examRoutes);
+app.use('/api/assignments', assignmentRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/student', studentPortalRoutes);
 
 // Đường dẫn gốc
 app.get('/', (req: Request, res: Response) => {

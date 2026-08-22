@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 // 1. Cập nhật dòng import Controller (Thêm createTeacher)
-import { register, login, studentLogin, getTeachers, createTeacher, resetTeacherPassword } from '../controllers/authController';
+import { register, login, studentLogin, getTeachers, createTeacher, resetTeacherPassword, getMe, updateProfile } from '../controllers/authController';
 // 2. Import thêm ổ khóa bảo vệ từ file middleware của bạn
 import { verifyToken, isAdmin } from '../middleware/authMiddleware'; 
 
@@ -23,5 +23,8 @@ router.get('/teachers', verifyToken, isAdmin, getTeachers);
 router.post('/teachers', verifyToken, isAdmin, createTeacher);
 
 router.put('/teachers/:id/reset-password', verifyToken, isAdmin, resetTeacherPassword);
+
+router.get('/me', verifyToken, getMe);
+router.put('/profile', verifyToken, updateProfile);
 
 export default router;

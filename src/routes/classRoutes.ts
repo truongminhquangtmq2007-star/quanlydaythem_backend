@@ -1,14 +1,43 @@
 import { Router } from 'express';
-import { getClasses, createClass, updateClass, deleteClass } from '../controllers/classController';
-import { assignTeacher } from '../controllers/classController';
+import { 
+  getClasses, 
+  createClass, 
+  updateClass, 
+  deleteClass, 
+  assignTeacher,
+  addMember,
+  createSession,
+  updateAttendance,
+  getClassMembers,
+  getClassSessions,
+  getSessionAttendance,
+  getClass
+} from '../controllers/classController';
+import { getClassAssignments } from '../controllers/assignmentController';
 import { verifyToken, isAdmin } from '../middleware/authMiddleware';
 
 const router = Router();
 
-// 2. Chèn bảo vệ vào trước mọi thao tác
 router.get('/', verifyToken, getClasses);
+router.get('/:id', verifyToken, getClass);
 router.post('/', verifyToken, isAdmin, createClass);
 router.put('/:id', verifyToken, isAdmin, updateClass);
 router.delete('/:id', verifyToken, isAdmin, deleteClass);
 router.put('/:id/assign-teacher', verifyToken, isAdmin, assignTeacher);
+
+// ==========================================
+// API MỚI CHO PHASE 1 - CORE
+// ==========================================
+
+router.get('/:id/members', verifyToken, getClassMembers);
+router.post('/:id/members', verifyToken, isAdmin, addMember);
+
+router.get('/:id/sessions', verifyToken, getClassSessions);
+router.post('/:id/sessions', verifyToken, isAdmin, createSession);
+
+router.get('/:id/assignments', verifyToken, getClassAssignments);
+
+router.get('/sessions/:id/attendance', verifyToken, getSessionAttendance);
+router.put('/sessions/:id/attendance', verifyToken, isAdmin, updateAttendance);
+
 export default router;

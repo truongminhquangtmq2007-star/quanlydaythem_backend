@@ -89,3 +89,43 @@ export const markBillAsPaid = async (req: any, res: any) => {
     res.status(500).json({ error: err.message }); 
   }
 };
+
+// 6. Gắn điểm thi vào hóa đơn (MỚI)
+export const addExamScores = async (req: any, res: any) => {
+  const scoresArray = req.body;
+
+  if (!Array.isArray(scoresArray) || scoresArray.length === 0) {
+    return res.status(400).json({ message: "Payload không hợp lệ" });
+  }
+
+  try {
+    for (const item of scoresArray) {
+      const { student_id, exam_title, score } = item;
+      
+      // Tìm phiếu thu CHƯA THANH TOÁN gần nhất của học sinh đó
+      const billRes = await pool.query(
+        `SELECT id, exam_scores FROM tuition_bills 
+         WHERE student_id = $1 AND is_paid = false 
+         ORDER BY created_at DESC LIMIT 1`,
+        [student_id]
+      );
+
+      if (billRes.rows.length > 0) {
+        const bill = billRes.rows[0];
+        // Đảm bảo exam_scores là mảng
+        let currentScores = Array.isArray(bill.exam_scores) ? bill.exam_scores : (bill.exam_scores ? JSON.parse(bill.exam_scores) : []);
+        
+        currentScores.push({ exam_title, score });
+
+        await pool.query(
+          `UPDATE tuition_bills SET exam_scores = $1::jsonb WHERE id = $2`,
+          [JSON.stringify(currentScores), bill.id]
+        );
+      }
+    }
+
+    res.json({ message: "Đã cập nhật điểm thi vào hóa đơn thành công!" });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+};

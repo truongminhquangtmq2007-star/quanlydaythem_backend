@@ -14,175 +14,501 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
         // NHẬN THÊM BIẾN exam_content TỪ FRONTEND
         const { document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content } = req.body;
         const documentCheck = await pool.query(
-    'SELECT id FROM documents WHERE id = $1',
-    [document_id]
-);
+            'SELECT id FROM documents WHERE id = $1',
+            [document_id]
+        );
 
-if (documentCheck.rows.length === 0) {
-    res.status(400).json({
-        message: `Tài liệu có ID ${document_id} không tồn tại`
-    });
-    return;
-}     
-const currentData = await pool.query(
-    `SELECT 
-        part1_key,
-        part2_key,
-        part3_key,
-        exam_content,
-        allow_view_answers,
-        duration_minutes
-     FROM exam_keys
-     WHERE document_id = $1`,
-    [document_id]
-);        const old = currentData.rows[0] || {
-    part1_key: {},
-    part2_key: {},
-    part3_key: {},
-    exam_content: null
-};
-const finalExamContent =
-    exam_content !== undefined
-        ? exam_content
-        : old.exam_content;
+        if (documentCheck.rows.length === 0) {
+            res.status(400).json({
+                message: `Tài liệu có ID ${document_id} không tồn tại`
+            });
+            return;
+        }
+
+        // Tự động tạo bảng question_contexts nếu chưa tồn tại
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS question_contexts (
+                id SERIAL PRIMARY KEY,
+                document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+                content TEXT NOT NULL,
+                image_url TEXT,
+                part VARCHAR(50),
+                question_ids JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Đảm bảo bảng exam_keys có cột context_id
+        try {
+            await pool.query(`
+                ALTER TABLE exam_keys ADD COLUMN IF NOT EXISTS context_id INTEGER REFERENCES question_contexts(id) ON DELETE SET NULL;
+            `);
+        } catch (colErr) {
+            // Bỏ qua nếu cột đã tồn tại hoặc không thể thêm
+        }
+
+        let primaryContextId: number | null = null;
+        let finalExamContent = exam_content;
+
+        // XỬ LÝ CÂU HỎI CHÙM (SHARED CONTEXT)
+        const rawShared = exam_content?.shared_context || exam_content?.sharedContexts || req.body.shared_context;
+        const sharedList = Array.isArray(rawShared) ? rawShared : rawShared ? [rawShared] : [];
+
+        if (sharedList.length > 0) {
+            // Xóa ngữ cảnh cũ của đề thi này nếu có
+            await pool.query('DELETE FROM question_contexts WHERE document_id = $1', [document_id]);
+
+            for (const item of sharedList) {
+                const content = item.content || item.text || (typeof item === 'string' ? item : '');
+                const imageUrl = item.image_url || null;
+                const part = item.part || 'part1';
+                const questionIds = item.questionIds || item.question_ids || [];
+
+                // Lưu vào bảng question_contexts trước để lấy ID
+                const insertContextRes = await pool.query(
+                    `INSERT INTO question_contexts (document_id, content, image_url, part, question_ids)
+                     VALUES ($1, $2, $3, $4, $5)
+                     RETURNING id`,
+                    [document_id, content, imageUrl, part, JSON.stringify(questionIds)]
+                );
+
+                const contextId = insertContextRes.rows[0]?.id;
+                if (!primaryContextId && contextId) {
+                    primaryContextId = contextId;
+                }
+
+                // Gán context_id vào đối tượng context
+                item.id = contextId;
+                item.context_id = contextId;
+
+                // Gán context_id vào các câu hỏi con tương ứng trong exam_content
+                if (finalExamContent) {
+                    const targetPart = (part === 'part2' ? finalExamContent.part2 : part === 'part3' ? finalExamContent.part3 : finalExamContent.part1) || [];
+                    targetPart.forEach((q: any) => {
+                        if (questionIds.includes(q.id)) {
+                            q.context_id = contextId;
+                        }
+                    });
+                }
+            }
+
+            if (finalExamContent) {
+                finalExamContent.shared_context = sharedList;
+                finalExamContent.sharedContexts = sharedList;
+            }
+        }
+
+        const currentData = await pool.query(
+            `SELECT 
+                part1_key,
+                part2_key,
+                part3_key,
+                exam_content,
+                allow_view_answers,
+                duration_minutes
+             FROM exam_keys
+             WHERE document_id = $1`,
+            [document_id]
+        );
+        const old = currentData.rows[0] || {
+            part1_key: {},
+            part2_key: {},
+            part3_key: {},
+            exam_content: null
+        };
+
+        const resolvedExamContent =
+            finalExamContent !== undefined
+                ? finalExamContent
+                : old.exam_content;
 
         const p1 = part1_key && Object.keys(part1_key).length > 0 ? part1_key : old.part1_key;
         const p2 = part2_key && Object.keys(part2_key).length > 0 ? part2_key : old.part2_key;
         const p3 = part3_key && Object.keys(part3_key).length > 0 ? part3_key : old.part3_key;
 
-        // CẬP NHẬT LỆNH SQL: THÊM exam_content VÀO CẢ INSERT LẪN UPDATE
-        const result = await pool.query(
-            `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+        // Lưu vào bảng exam_keys kèm context_id tương ứng
+        await pool.query(
+            `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content, context_id) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
              ON CONFLICT (document_id) 
              DO UPDATE SET 
                 part1_key = $3, part2_key = $4, part3_key = $5,
-                allow_view_answers = $6, duration_minutes = $7, exam_content = $8
+                allow_view_answers = $6, duration_minutes = $7, exam_content = $8, context_id = $9
              RETURNING *`,
             [
-    document_id,
-    class_id,
-    p1,
-    p2,
-    p3,
-    allow_view_answers,
-    duration_minutes,
-    finalExamContent
-]
+                document_id,
+                class_id,
+                p1,
+                p2,
+                p3,
+                allow_view_answers,
+                duration_minutes,
+                resolvedExamContent,
+                primaryContextId
+            ]
         );
 
-        res.status(200).json({ message: 'Lưu đề thi và đáp án thành công!' });
+        res.status(200).json({ 
+            message: 'Lưu đề thi và đáp án thành công!',
+            context_id: primaryContextId
+        });
     } catch (error) {
         console.error('LỖI LƯU ĐÁP ÁN VÀ NỘI DUNG ĐỀ:', error);
         res.status(500).json({ message: 'Lỗi server', detail: (error as Error).message });
     }
 };
+
 const normalizeShortAnswer = (value: any): string => {
     return String(value ?? '')
         .trim()
         .replace(/\s+/g, '')
         .replace(',', '.');
 };
+
 // ========================================================
-// 2. API HỌC SINH: NỘP BÀI VÀ CHẤM ĐIỂM TỰ ĐỘNG
+// 2. API HỌC SINH: NỘP BÀI VÀ CHẤM ĐIỂM TỰ ĐỘNG (AUTO-GRADING)
 // ========================================================
 export const submitExam = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const studentId = req.user?.id;
-        const { document_id, student_answers, cheat_count } = req.body;
+        const examId = req.params.id || req.body.document_id || req.body.exam_id;
+        const { student_answers, answers, cheat_count, time_taken_seconds } = req.body;
 
-        const keyResult = await pool.query(`SELECT * FROM exam_keys WHERE document_id = $1`, [document_id]);
+        if (!examId) {
+            res.status(400).json({ message: 'Thiếu mã đề thi (document_id / exam_id)!' });
+            return;
+        }
+
+        // Tự động tạo bảng exam_submissions nếu chưa tồn tại
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS exam_submissions (
+                id SERIAL PRIMARY KEY,
+                document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+                exam_id INTEGER,
+                student_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                student_answers JSONB,
+                total_score NUMERIC(5,2),
+                part1_score NUMERIC(5,2) DEFAULT 0,
+                part2_score NUMERIC(5,2) DEFAULT 0,
+                part3_score NUMERIC(5,2) DEFAULT 0,
+                cheat_count INTEGER DEFAULT 0,
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                time_taken_seconds INTEGER DEFAULT 0,
+                detailed_results JSONB
+            );
+        `);
+
+        // Đảm bảo các cột mới luôn tồn tại
+        try {
+            await pool.query(`ALTER TABLE exam_submissions ADD COLUMN IF NOT EXISTS time_taken_seconds INTEGER DEFAULT 0;`);
+            await pool.query(`ALTER TABLE exam_submissions ADD COLUMN IF NOT EXISTS detailed_results JSONB;`);
+            await pool.query(`ALTER TABLE exam_submissions ADD COLUMN IF NOT EXISTS exam_id INTEGER;`);
+        } catch (colErr) {}
+
+        const keyResult = await pool.query(`SELECT * FROM exam_keys WHERE document_id = $1`, [examId]);
         if (keyResult.rows.length === 0) {
             res.status(404).json({ message: 'Đề thi này chưa được giáo viên thiết lập đáp án!' });
             return;
         }
         
         const answerKey = keyResult.rows[0];
-        let p1Score = 0, p2Score = 0, p3Score = 0;
 
-        if (student_answers.part1) {
-            for (const [q, ans] of Object.entries(student_answers.part1)) {
-                if (answerKey.part1_key[q] === ans) p1Score += 0.25;
-            }
+        // Chuẩn hóa câu trả lời của học sinh từ payload
+        let p1Answers: { [key: string]: any } = {};
+        let p2Answers: { [key: string]: any } = {};
+        let p3Answers: { [key: string]: any } = {};
+        const flatAnswers: { [key: string]: any } = {};
+
+        if (Array.isArray(student_answers)) {
+            student_answers.forEach((item: any) => {
+                const qId = String(item.question_id || item.id);
+                flatAnswers[qId] = item.student_answer ?? item.answer;
+                if (item.part === 'part2') p2Answers[qId] = item.student_answer;
+                else if (item.part === 'part3') p3Answers[qId] = item.student_answer;
+                else p1Answers[qId] = item.student_answer;
+            });
+        } else if (Array.isArray(answers)) {
+            answers.forEach((item: any) => {
+                const qId = String(item.question_id || item.id);
+                flatAnswers[qId] = item.student_answer ?? item.answer;
+                if (item.part === 'part2') p2Answers[qId] = item.student_answer;
+                else if (item.part === 'part3') p3Answers[qId] = item.student_answer;
+                else p1Answers[qId] = item.student_answer;
+            });
+        } else if (student_answers && typeof student_answers === 'object') {
+            p1Answers = student_answers.part1 || {};
+            p2Answers = student_answers.part2 || {};
+            p3Answers = student_answers.part3 || {};
+            Object.entries(p1Answers).forEach(([k, v]) => { flatAnswers[k] = v; });
+            Object.entries(p2Answers).forEach(([k, v]) => { flatAnswers[k] = v; });
+            Object.entries(p3Answers).forEach(([k, v]) => { flatAnswers[k] = v; });
         }
 
-        if (student_answers.part2) {
-            for (const [q, subAns] of Object.entries(student_answers.part2)) {
-                const key = answerKey.part2_key[q];
-                if (!key) continue;
+        const rawPart1Key = answerKey.part1_key || {};
+        const rawPart2Key = answerKey.part2_key || {};
+        const rawPart3Key = answerKey.part3_key || {};
+
+        const p1KeyEntries = Object.entries(rawPart1Key);
+        const p2KeyEntries = Object.entries(rawPart2Key);
+        const p3KeyEntries = Object.entries(rawPart3Key);
+
+        const p1Total = p1KeyEntries.length;
+        const p2Total = p2KeyEntries.length;
+        const p3Total = p3KeyEntries.length;
+
+        // Nhận diện đề Tiếng Anh (thuộc tính part trống hoặc chỉ có part1)
+        const isEnglishExam = p1Total > 0 && p2Total === 0 && p3Total === 0;
+
+        let p1Score = 0;
+        let p2Score = 0;
+        let p3Score = 0;
+        let p1Correct = 0;
+        let p2Correct = 0;
+        let p3Correct = 0;
+
+        const details: any[] = [];
+
+        // THUẬT TOÁN 1: ĐỀ TIẾNG ANH (CHỈ CÓ TRẮC NGHIỆM 4 LỰA CHỌN)
+        if (isEnglishExam) {
+            const pointPerQuestion = p1Total > 0 ? (10.0 / p1Total) : 0.2;
+
+            for (const [qStr, correctAns] of p1KeyEntries) {
+                const qId = Number(qStr);
+                const sAns = p1Answers[qStr] ?? p1Answers[qId] ?? flatAnswers[qStr] ?? flatAnswers[qId] ?? '';
+                const isCorrect = (String(sAns).trim().toUpperCase() === String(correctAns).trim().toUpperCase()) && Boolean(sAns);
+                const scoreEarned = isCorrect ? pointPerQuestion : 0;
+
+                if (isCorrect) {
+                    p1Correct++;
+                    p1Score += pointPerQuestion;
+                }
+
+                details.push({
+                    question_id: qId,
+                    part: 'part1',
+                    student_answer: sAns || null,
+                    correct_answer: correctAns,
+                    is_correct: isCorrect,
+                    score_earned: Math.round(scoreEarned * 100) / 100,
+                    max_score: Math.round(pointPerQuestion * 100) / 100
+                });
+            }
+        } 
+        // THUẬT TOÁN 2: ĐỀ KHOA HỌC / TOÁN (CÓ PART 1, PART 2, PART 3)
+        else {
+            // Phần 1: Trắc nghiệm 4 lựa chọn (0.25 điểm / câu)
+            for (const [qStr, correctAns] of p1KeyEntries) {
+                const qId = Number(qStr);
+                const sAns = p1Answers[qStr] ?? p1Answers[qId] ?? flatAnswers[qStr] ?? flatAnswers[qId] ?? '';
+                const isCorrect = (String(sAns).trim().toUpperCase() === String(correctAns).trim().toUpperCase()) && Boolean(sAns);
+                const scoreEarned = isCorrect ? 0.25 : 0;
+
+                if (isCorrect) {
+                    p1Correct++;
+                    p1Score += 0.25;
+                }
+
+                details.push({
+                    question_id: qId,
+                    part: 'part1',
+                    student_answer: sAns || null,
+                    correct_answer: correctAns,
+                    is_correct: isCorrect,
+                    score_earned: scoreEarned,
+                    max_score: 0.25
+                });
+            }
+
+            // Phần 2: Trắc nghiệm Đúng / Sai 4 ý a, b, c, d
+            for (const [qStr, keyObj] of p2KeyEntries) {
+                const qId = Number(qStr);
+                const sObj = p2Answers[qStr] ?? p2Answers[qId] ?? flatAnswers[qStr] ?? flatAnswers[qId] ?? {};
+                const correctObj = (keyObj || {}) as { [stmt: string]: string };
 
                 let correctCount = 0;
-                const subObj = subAns as any;
-                
-                ['a', 'b', 'c', 'd'].forEach(sub => {
-                    if (subObj[sub] && subObj[sub] === key[sub]) correctCount++;
+                const statementResults: any[] = [];
+
+                ['a', 'b', 'c', 'd'].forEach((stmt) => {
+                    const sVal = sObj[stmt] ? String(sObj[stmt]).trim() : '';
+                    const cVal = correctObj[stmt] ? String(correctObj[stmt]).trim() : '';
+                    const stmtCorrect = Boolean(sVal && sVal === cVal);
+                    if (stmtCorrect) correctCount++;
+
+                    statementResults.push({
+                        statement: stmt,
+                        student: sVal || null,
+                        correct: cVal || null,
+                        is_correct: stmtCorrect
+                    });
                 });
 
-                if (correctCount === 1) p2Score += 0.1;
-                else if (correctCount === 2) p2Score += 0.25;
-                else if (correctCount === 3) p2Score += 0.5;
-                else if (correctCount === 4) p2Score += 1.0;
+                let qScore = 0;
+                if (correctCount === 1) qScore = 0.1;
+                else if (correctCount === 2) qScore = 0.25;
+                else if (correctCount === 3) qScore = 0.5;
+                else if (correctCount === 4) qScore = 1.0;
+
+                p2Score += qScore;
+                if (correctCount === 4) p2Correct++;
+
+                details.push({
+                    question_id: qId,
+                    part: 'part2',
+                    student_answer: sObj,
+                    correct_answer: correctObj,
+                    is_correct: correctCount === 4,
+                    correct_statements_count: correctCount,
+                    score_earned: qScore,
+                    max_score: 1.0,
+                    statement_results: statementResults
+                });
+            }
+
+            // Phần 3: Trắc nghiệm Trả lời ngắn
+            // Nếu Phần 1 có từ 18 câu trở lên thì mỗi câu Phần 3 là 0.25đ, ngược lại (12 câu) là 0.5đ
+            const part3PointPerQuestion = p1Total >= 18 ? 0.25 : 0.5;
+
+            for (const [qStr, correctAns] of p3KeyEntries) {
+                const qId = Number(qStr);
+                const rawStudentAns = p3Answers[qStr] ?? p3Answers[qId] ?? flatAnswers[qStr] ?? flatAnswers[qId] ?? '';
+                const studentVal = normalizeShortAnswer(rawStudentAns);
+                const keyVal = normalizeShortAnswer(correctAns);
+
+                const isCorrect = (studentVal === keyVal && studentVal !== '' && keyVal !== '');
+                const scoreEarned = isCorrect ? part3PointPerQuestion : 0;
+
+                if (isCorrect) {
+                    p3Correct++;
+                    p3Score += part3PointPerQuestion;
+                }
+
+                details.push({
+                    question_id: qId,
+                    part: 'part3',
+                    student_answer: rawStudentAns ?? '',
+                    correct_answer: correctAns,
+                    is_correct: isCorrect,
+                    score_earned: scoreEarned,
+                    max_score: part3PointPerQuestion
+                });
             }
         }
 
-        // ========================================================
-// CHẤM ĐIỂM PHẦN 3 - TỰ ĐỘNG THEO SỐ CÂU PHẦN 1
-// ========================================================
+        // Sắp xếp chi tiết câu hỏi theo id tăng dần
+        details.sort((a, b) => a.question_id - b.question_id);
 
-// Đếm tổng số câu trắc nghiệm Phần 1
-const part1QuestionCount = Object.keys(answerKey.part1_key || {}).length;
+        const totalScore = Math.min(10.0, Math.round((p1Score + p2Score + p3Score) * 100) / 100);
+        const roundedP1Score = Math.round(p1Score * 100) / 100;
+        const roundedP2Score = Math.round(p2Score * 100) / 100;
+        const roundedP3Score = Math.round(p3Score * 100) / 100;
+        const cheatCountNum = Number(cheat_count) || 0;
+        const timeTakenNum = Number(time_taken_seconds) || 0;
 
-// Mặc định mỗi câu trả lời ngắn là 0.5 điểm
-let part3PointPerQuestion = 0.5;
+        const normalizedAnswersPayload = {
+            part1: p1Answers,
+            part2: p2Answers,
+            part3: p3Answers
+        };
 
-// Nếu Phần 1 có từ 18 câu trở lên thì mỗi câu Phần 3 là 0.25 điểm
-if (part1QuestionCount >= 18) {
-    part3PointPerQuestion = 0.25;
-}
-
-console.log('Số câu Phần 1:', part1QuestionCount);
-console.log('Điểm mỗi câu Phần 3:', part3PointPerQuestion);
-
-if (student_answers.part3) {
-    for (const [q, ans] of Object.entries(student_answers.part3)) {
-        const studentVal = normalizeShortAnswer(ans);
-
-        // Kiểm tra đáp án có tồn tại trước
-        const correctAnswer = answerKey.part3_key?.[q];
-
-        if (correctAnswer === undefined || correctAnswer === null) {
-            continue;
-        }
-
-        const keyVal = normalizeShortAnswer(correctAnswer);
-
-        // Đúng đáp án và không được để trống
-        if (studentVal === keyVal && studentVal !== '') {
-            p3Score += part3PointPerQuestion;
-        }
-    }
-}
-
-        const totalScore = p1Score + p2Score + p3Score;
-
+        // Lưu kết quả nộp bài vào bảng exam_submissions
         const submitResult = await pool.query(
             `INSERT INTO exam_submissions 
-            (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-            [document_id, studentId, student_answers, totalScore, p1Score, p2Score, p3Score, cheat_count || 0]
+            (document_id, exam_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, detailed_results) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+            [
+                examId,
+                examId,
+                studentId,
+                normalizedAnswersPayload,
+                totalScore,
+                roundedP1Score,
+                roundedP2Score,
+                roundedP3Score,
+                cheatCountNum,
+                timeTakenNum,
+                JSON.stringify(details)
+            ]
         );
 
+        // ========================================================
+        // PHASE 5: TÍNH TOÁN HIỆU SUẤT THEO CHUYÊN ĐỀ (ANALYTICS)
+        // ========================================================
+        try {
+            const examContent = answerKey.exam_content || {};
+            const allQuestions = [
+                ...(examContent.part1 || []),
+                ...(examContent.part2 || []),
+                ...(examContent.part3 || [])
+            ];
+
+            // Gom nhóm hiệu suất theo topic trong bài làm này
+            const topicPerformance: Record<string, { attempts: number, corrects: number }> = {};
+            
+            for (const detail of details) {
+                // Thử tìm topic trong exam_content hoặc fallback
+                const q = allQuestions.find(x => String(x.id) === String(detail.question_id));
+                const topic = q?.topic || 'Chưa phân loại';
+
+                if (!topicPerformance[topic]) {
+                    topicPerformance[topic] = { attempts: 0, corrects: 0 };
+                }
+                
+                topicPerformance[topic].attempts += 1;
+                if (detail.is_correct) {
+                    topicPerformance[topic].corrects += 1;
+                }
+            }
+
+            // Upsert vào bảng student_topic_performance
+            for (const [topic, stats] of Object.entries(topicPerformance)) {
+                await pool.query(
+                    `INSERT INTO student_topic_performance (student_id, topic, attempt_count, correct_count, accuracy_rate)
+                     VALUES ($1, $2, $3, $4, $5)
+                     ON CONFLICT (student_id, topic) DO UPDATE SET 
+                        attempt_count = student_topic_performance.attempt_count + EXCLUDED.attempt_count,
+                        correct_count = student_topic_performance.correct_count + EXCLUDED.correct_count,
+                        accuracy_rate = ROUND(CAST((student_topic_performance.correct_count + EXCLUDED.correct_count) AS NUMERIC) * 100.0 / (student_topic_performance.attempt_count + EXCLUDED.attempt_count), 2),
+                        last_updated = CURRENT_TIMESTAMP`,
+                    [
+                        studentId, 
+                        topic, 
+                        stats.attempts, 
+                        stats.corrects, 
+                        Math.round((stats.corrects / stats.attempts) * 100 * 100) / 100 // Tạm initial rate
+                    ]
+                );
+            }
+        } catch (analyticsErr) {
+            console.error('Lỗi tính toán Analytics:', analyticsErr);
+            // Không block luồng nộp bài nếu lỗi analytics
+        }
+
         res.status(200).json({ 
-            message: 'Nộp bài và chấm điểm thành công!', 
+            message: 'Nộp bài và chấm điểm thành công!',
+            submissionId: submitResult.rows[0].id,
             score: { 
-                totalScore, p1Score, p2Score, p3Score,
+                totalScore, 
+                p1Score: roundedP1Score, 
+                p2Score: roundedP2Score, 
+                p3Score: roundedP3Score,
                 allow_view_answers: answerKey.allow_view_answers
             },
-            submissionId: submitResult.rows[0].id
+            summary: {
+                total_score: totalScore,
+                total_correct: p1Correct + p2Correct + p3Correct,
+                total_questions: p1Total + p2Total + p3Total,
+                cheat_count: cheatCountNum,
+                time_taken_seconds: timeTakenNum,
+                part1: { correct: p1Correct, total: p1Total, score: roundedP1Score },
+                part2: { correct: p2Correct, total: p2Total, score: roundedP2Score },
+                part3: { correct: p3Correct, total: p3Total, score: roundedP3Score }
+            },
+            cheat_count: cheatCountNum,
+            details: details
         });
     } catch (error) {
         console.error('Lỗi chấm điểm:', error);
-        res.status(500).json({ message: 'Lỗi server khi xử lý bài thi' });
+        res.status(500).json({ message: 'Lỗi server khi xử lý bài thi', detail: (error as Error).message });
     }
 };
 
@@ -193,10 +519,24 @@ export const getExamSubmissions = async (req: AuthRequest, res: Response): Promi
     try {
         const { document_id } = req.params;
         const result = await pool.query(
-            `SELECT es.*, u.username as student_name 
+            `SELECT 
+                es.id,
+                es.document_id,
+                es.exam_id,
+                es.student_id,
+                u.username as student_name,
+                es.total_score,
+                es.part1_score,
+                es.part2_score,
+                es.part3_score,
+                es.student_answers,
+                es.detailed_results,
+                es.cheat_count,
+                es.submitted_at,
+                es.time_taken_seconds
              FROM exam_submissions es 
              JOIN users u ON es.student_id = u.id 
-             WHERE es.document_id = $1 
+             WHERE es.document_id = $1 OR es.exam_id = $1 
              ORDER BY es.total_score DESC, es.submitted_at DESC`,
             [document_id]
         );
@@ -206,6 +546,7 @@ export const getExamSubmissions = async (req: AuthRequest, res: Response): Promi
         res.status(500).json({ message: 'Lỗi server' });
     }
 };
+
 
 // ========================================================
 // 4. API HỌC SINH: LẤY LỊCH SỬ THI CÁ NHÂN
@@ -321,7 +662,6 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
 
         console.log('--- XỬ LÝ FILE HOÀN TẤT ---');
 
-        // 3. KHÔNG LƯU DATABASE TỰ ĐỘNG NỮA. CHỈ TRẢ VỀ CHO FRONTEND.
         res.status(200).json({ 
             message: 'Phân tích file bằng AI thành công! Vui lòng kiểm tra và chỉnh sửa trước khi lưu.',
             examKey: {
@@ -337,5 +677,94 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
     } catch (error: any) {
         console.error('Lỗi nhận và xử lý file:', error);
         res.status(500).json({ message: 'Lỗi server khi AI xử lý file', detail: error.message });
+    }
+};
+
+// ========================================================
+// 8. API PHASE 3: LẤY DANH SÁCH NGÂN HÀNG ĐỀ (EXAM BANK)
+// ========================================================
+export const getAllExams = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const result = await pool.query(`
+            SELECT e.*, d.file_url 
+            FROM exams e 
+            LEFT JOIN documents d ON e.document_id = d.id 
+            ORDER BY e.created_at DESC
+        `);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Lỗi lấy danh sách đề thi' });
+    }
+};
+
+// ========================================================
+// 9. API PHASE 3: XUẤT BẢN ĐỀ THI (PUBLISH EXAM)
+// ========================================================
+export const publishExam = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { document_id, title, grade, subject, duration_minutes, questions, contexts } = req.body;
+        
+        // Bắt đầu Transaction
+        await pool.query('BEGIN');
+
+        // 1. Lưu vào bảng exams
+        const examRes = await pool.query(
+            `INSERT INTO exams (document_id, title, grade, subject, duration_minutes, status) 
+             VALUES ($1, $2, $3, $4, $5, 'PUBLISHED') RETURNING id`,
+            [document_id, title, grade, subject, duration_minutes || 60]
+        );
+        const examId = examRes.rows[0].id;
+
+        // 2. Lưu Contexts (nếu có)
+        const contextMap: Record<number, number> = {}; // { tempId: realId }
+        if (contexts && contexts.length > 0) {
+            for (let i = 0; i < contexts.length; i++) {
+                const ctx = contexts[i];
+                const ctxRes = await pool.query(
+                    `INSERT INTO question_contexts (exam_id, content, image_url) 
+                     VALUES ($1, $2, $3) RETURNING id`,
+                    [examId, ctx.content, ctx.image_url || null]
+                );
+                // Giả sử frontend gửi kèm id tạm thời (temp_id) để map
+                if (ctx.temp_id) {
+                    contextMap[ctx.temp_id] = ctxRes.rows[0].id;
+                }
+            }
+        }
+
+        // 3. Lưu Questions & Options
+        if (questions && questions.length > 0) {
+            for (let i = 0; i < questions.length; i++) {
+                const q = questions[i];
+                const realContextId = q.context_temp_id ? contextMap[q.context_temp_id] : null;
+
+                const qRes = await pool.query(
+                    `INSERT INTO questions (exam_id, context_id, content, question_type, difficulty, topic, raw_latex, order_index) 
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+                    [examId, realContextId, q.content, q.question_type || 'MCQ', q.difficulty || 'MEDIUM', q.topic || null, q.raw_latex || null, i]
+                );
+                const qId = qRes.rows[0].id;
+
+                // Options
+                if (q.options && q.options.length > 0) {
+                    for (let j = 0; j < q.options.length; j++) {
+                        const opt = q.options[j];
+                        await pool.query(
+                            `INSERT INTO question_options (question_id, content, is_correct, order_index) 
+                             VALUES ($1, $2, $3, $4)`,
+                            [qId, opt.content, opt.is_correct || false, j]
+                        );
+                    }
+                }
+            }
+        }
+
+        await pool.query('COMMIT');
+        res.status(201).json({ message: 'Xuất bản đề thi thành công!', exam_id: examId });
+    } catch (error) {
+        await pool.query('ROLLBACK');
+        console.error('Lỗi publish đề:', error);
+        res.status(500).json({ message: 'Lỗi xuất bản đề thi' });
     }
 };

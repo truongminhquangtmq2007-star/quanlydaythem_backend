@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { verifyToken } from '../middleware/authMiddleware';
+import { verifyToken, isAdmin } from '../middleware/authMiddleware';
 import { 
     saveAnswerKey, 
     submitExam, 
@@ -8,11 +8,17 @@ import {
     getMySubmissions, 
     getExamKey,
     createExamFromText,
-    parseExamFromFile
+    parseExamFromFile,
+    getAllExams,
+    publishExam
 } from '../controllers/examController';
 import { uploadMemory } from '../middleware/uploadMiddleware';
 
 const router = Router();
+
+// Phase 3 Routes (Exam Engine)
+router.get('/', verifyToken, isAdmin, getAllExams);
+router.post('/publish', verifyToken, isAdmin, publishExam);
 
 // Cấu hình Multer lưu file tạm vào RAM (bộ nhớ đệm)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -38,10 +44,11 @@ router.get('/key/:document_id', verifyToken, getExamKey);
 // ==========================================
 // ROUTES CHO HỌC SINH
 // ==========================================
-// 6. Nộp bài trắc nghiệm
+// 6. Nộp bài trắc nghiệm và chấm điểm tự động
+router.post('/:id/submit', verifyToken, submitExam);
 router.post('/submit', verifyToken, submitExam);
 
 // 7. Lấy lịch sử điểm thi cá nhân
 router.get('/my-submissions', verifyToken, getMySubmissions);
 
-export default router;
+export default router;
