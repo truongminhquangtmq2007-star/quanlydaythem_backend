@@ -7,6 +7,7 @@ import {
     getExamSubmissions, 
     getMySubmissions, 
     getExamKey,
+    askAITutor,
     createExamFromText,
     parseExamFromFile,
     getAllExams,
@@ -56,4 +57,6 @@ router.post('/submit', verifyToken, submitExam);
 // 7. Lấy lịch sử điểm thi cá nhân
 router.get('/my-submissions', verifyToken, getMySubmissions);
 
-export default router;
+export default router;
+// Gia sư AI giải đáp thắc mắc
+router.post('/ask-tutor', verifyToken, askAITutor);

@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
+import { TAXONOMIES } from '../constants/taxonomies';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -78,6 +79,8 @@ const examResponseSchema = {
             required: ['A', 'B', 'C', 'D'],
           },
           correctAnswer: { type: Type.STRING },
+          main_topic: { type: Type.STRING },
+          sub_topic: { type: Type.STRING },
         },
         required: ['id', 'questionText', 'options', 'correctAnswer'],
       },
@@ -100,6 +103,8 @@ const examResponseSchema = {
             properties: { a: { type: Type.STRING }, b: { type: Type.STRING }, c: { type: Type.STRING }, d: { type: Type.STRING } },
             required: ['a', 'b', 'c', 'd'],
           },
+          main_topic: { type: Type.STRING },
+          sub_topic: { type: Type.STRING },
         },
         required: ['id', 'questionText', 'statements', 'correctAnswer'],
       },
@@ -113,6 +118,8 @@ const examResponseSchema = {
           questionText: { type: Type.STRING },
           image_url: { type: Type.STRING },
           correctAnswer: { type: Type.STRING },
+          main_topic: { type: Type.STRING },
+          sub_topic: { type: Type.STRING },
         },
         required: ['id', 'questionText', 'correctAnswer'],
       },
@@ -162,10 +169,10 @@ const examResponseSchema = {
 // CƠ CHẾ TỰ ĐỘNG THỬ LẠI (RETRY) KHI GEMINI QUÁ TẢI
 // ==========================================
 const MODEL_FALLBACK_CHAIN = [
-  'gemini-2.5-pro',         // Mạnh nhất, chính xác nhất cho bóc tách đề thi
-  'gemini-2.5-flash',       // Nhanh, thông minh, hỗ trợ JSON schema
-  'gemini-3.5-flash',       // Thế hệ mới nhất
-  'gemini-3.1-flash-lite',  // Dự phòng nhẹ nhất, ít bị quá tải
+  'gemini-3.7-flash',           // Mạnh nhất
+  'gemini-3.6-flash',  // Nhanh, ổn định
+  'gemini-3.5-flash',         // Dự phòng flash
+  'gemini-3.1-pro-preview',         // Thế hệ trước, dự phòng
 ];
 
 const MAX_RETRIES_PER_MODEL = 3;
@@ -272,6 +279,9 @@ YÊU CẦU BẮT BUỘC:
    - Các câu hỏi con này vẫn PHẢI xuất hiện đầy đủ trong mảng part1 (hoặc part tương ứng) để đảm bảo toàn bộ đề thi có đầy đủ danh sách câu hỏi.
    - KHÔNG lặp lại bài đọc / ngữ cảnh dùng chung này vào "questionText" của từng câu con.
 6. CẤM TUYỆT ĐỐI DÙNG BẢNG LATEX: KHÔNG được dùng \\begin{array}, \\begin{tabular}, \\begin{matrix} hay bất kỳ môi trường bảng LaTeX nào. Nếu đề bài có bảng số liệu (ví dụ bảng tần số ghép nhóm), hãy trình bày lại nội dung bảng đó dưới dạng VĂN BẢN THƯỜNG, liệt kê từng khoảng và giá trị tương ứng theo định dạng: "Nhóm [8,10): tần số 4; Nhóm [10,12): tần số 5; ..." Chỉ dùng ký hiệu $ $ cho CÔNG THỨC TOÁN ĐƠN LẺ.
+7. PHÂN LOẠI DẠNG BÀI (BẮT BUỘC): Bạn là chuyên gia phân loại đề thi. Đối với mỗi câu hỏi, dựa vào dữ liệu danh mục cung cấp sau đây:
+   ${JSON.stringify(TAXONOMIES)}
+   Hãy chọn và trả về CHÍNH XÁC tên "main_topic" và "sub_topic" tương ứng. Không được tự bịa tên nằm ngoài danh sách. ( còn các môn được định nghĩa sẵn thì bắt buộc không được thay đổi hay bịa thêm,Nếu là Tiếng Anh hoặc các môn khác tự định nghĩa các chủ đề phù hợp như "Ngữ pháp", "Đọc hiểu", v.v.)
 `;
 
 
@@ -320,4 +330,27 @@ export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File)
     console.error('Lỗi khi bóc tách file với Gemini:', error);
     throw error;
   }
-};
+};
+
+
+export async function generateWithFallback(prompt: string): Promise<string> {
+  let lastError: any = null;
+
+  for (const modelName of MODEL_FALLBACK_CHAIN) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: prompt,
+      });
+
+      if (response.text) {
+         return response.text;
+      }
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`[AI Warning] Mô hình ${modelName} lỗi, đang thử mô hình tiếp theo...`, error.message);
+    }
+  }
+  
+  throw lastError;
+}
