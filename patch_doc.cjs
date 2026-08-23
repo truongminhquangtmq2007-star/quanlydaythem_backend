@@ -1,4 +1,6 @@
+const fs = require('fs');
 
+const code = `
 import { Request, Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
@@ -66,8 +68,8 @@ export const getFolderContents = async (req: AuthRequest, res: Response): Promis
       params = [folderId];
     }
     
-    const foldersRes = await pool.query(`SELECT * FROM folders WHERE ${parentCond} ORDER BY name`, params);
-    const docsRes = await pool.query(`SELECT * FROM documents WHERE ${folderCond} ORDER BY title`, params);
+    const foldersRes = await pool.query(\`SELECT * FROM folders WHERE \${parentCond} ORDER BY name\`, params);
+    const docsRes = await pool.query(\`SELECT * FROM documents WHERE \${folderCond} ORDER BY title\`, params);
     
     res.status(200).json({
       folders: foldersRes.rows,
@@ -134,3 +136,8 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
   // Legacy method fallback
   res.status(200).json({ message: 'Legacy upload method' });
 };
+`;
+
+fs.writeFileSync('src/controllers/documentController.ts', code);
+console.log('Replaced documentController.ts');
+

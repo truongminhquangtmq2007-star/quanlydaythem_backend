@@ -12,7 +12,7 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
 
         // SCHEMA THẬT: students (id, full_name, phone_number, school_name, ...)
         const profileRes = await pool.query(
-            "SELECT id, full_name, phone_number AS phone, school_name AS school FROM students WHERE id = $1",
+            "SELECT id, full_name, phone_number AS phone, school_name AS school, COALESCE(ai_evaluation, 'null'::jsonb) AS ai_evaluation FROM students WHERE id = $1",
             [studentId]
         );
         const profile = profileRes.rows[0];
