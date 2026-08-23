@@ -47,3 +47,4 @@ code = code.replace(
 
 fs.writeFileSync('src/controllers/studentPortalController.ts', code);
 console.log('Fixed dashboard API');
+
