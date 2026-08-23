@@ -129,15 +129,13 @@ export const getClassMembers = async (req: Request, res: Response): Promise<void
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `SELECT cm.*, s.full_name, s.student_code, s.phone 
-       FROM class_members cm 
-       JOIN students s ON cm.student_id = s.id 
-       WHERE cm.class_id = $1 ORDER BY s.full_name`,
+      'SELECT s.id, s.full_name, s.phone_number AS phone FROM students s JOIN enrollments cm ON s.id = cm.student_id WHERE cm.class_id = $1 ORDER BY s.full_name',
       [id]
     );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ message: "Lỗi server" });
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error("Lỗi get class members:", error);
+    res.status(500).json({ error: "Lỗi khi lấy danh sách học sinh" });
   }
 };
 

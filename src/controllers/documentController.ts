@@ -134,3 +134,39 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
   // Legacy method fallback
   res.status(200).json({ message: 'Legacy upload method' });
 };
+
+export const getDrive = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { category, class_id } = req.query;
+    // Just a placeholder to return folders and docs matching conditions
+    let foldersQuery = 'SELECT * FROM folders WHERE 1=1';
+    let docsQuery = 'SELECT * FROM documents WHERE 1=1';
+    const params: any[] = [];
+    let paramIdx = 1;
+
+    if (category) {
+      foldersQuery += ` AND category = $${paramIdx}`;
+      docsQuery += ` AND category = $${paramIdx}`;
+      params.push(category);
+      paramIdx++;
+    }
+
+    if (class_id) {
+      foldersQuery += ` AND class_id = $${paramIdx}`;
+      docsQuery += ` AND class_id = $${paramIdx}`;
+      params.push(class_id);
+      paramIdx++;
+    }
+
+    const foldersRes = await pool.query(foldersQuery, params);
+    const docsRes = await pool.query(docsQuery, params);
+
+    res.status(200).json({
+      folders: foldersRes.rows,
+      documents: docsRes.rows
+    });
+  } catch (error) {
+    console.error('Lỗi getDrive:', error);
+    res.status(500).json({ error: 'Lỗi server' });
+  }
+};
