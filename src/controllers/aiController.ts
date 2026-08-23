@@ -59,8 +59,7 @@ Bối cảnh học sinh:
 - Hình thức học: ${classTypeContext}
 3. Liên hệ khéo léo đến mục tiêu ngắn hạn của học sinh để truyền động lực.`;
 
-        const explanationResult = await generateWithFallback(prompt);
-        const explanation = explanationResult.response.text();
+        const explanation = await generateWithFallback(prompt);
         res.status(200).json({ explanation });
     } catch (error) {
         console.error('Lỗi explainError controller:', error);
@@ -121,8 +120,7 @@ export const generateRemark = async (req: AuthRequest, res: Response): Promise<v
 ${classTypeContext}
 Hãy viết một đoạn nhận xét ngắn gọn (dưới 100 chữ), khéo léo, mang tính động viên tiến bộ cá nhân, thái độ học tập và nhắc nhở đóng học phí (nếu còn nợ) để gửi cho phụ huynh. Trả về Markdown định dạng chuyên nghiệp.`;
 
-        const remarkResult = await generateWithFallback(prompt);
-        const remark = remarkResult.response.text();
+        const remark = await generateWithFallback(prompt);
         res.status(200).json({ remark });
     } catch (error) {
         console.error('Lỗi generateRemark:', error);
