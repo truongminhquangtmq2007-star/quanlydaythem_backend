@@ -10,12 +10,13 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
             return;
         }
 
-        // Lấy thông tin cá nhân (Sửa lại chỉ lấy cột có thực)
-        const profileRes = await pool.query('SELECT id, full_name, phone_number, school FROM students WHERE id = $1', [studentId]);
+        // Bỏ cột grade mock, chỉ lấy các cột thực tế
+        const profileRes = await pool.query(
+            "SELECT id, full_name, phone_number AS phone, school_name AS school FROM students WHERE id = $1", 
+            [studentId]
+        );
         const profile = profileRes.rows[0];
 
-        // Điểm trung bình (7 ngày qua) -> sửa thành bảng bài tập hoặc điểm (nếu có)
-        // Hiện tại cứ query từ exam_submissions
         let avgScore = 'Chưa có';
         let examsCount = 0;
         try {
@@ -24,9 +25,8 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
                 avgScore = (examsRes.rows.reduce((sum, e) => sum + Number(e.total_score || 0), 0) / examsRes.rows.length).toFixed(1);
             }
             examsCount = examsRes.rows.length;
-        } catch(e) { console.error("Lỗi lấy điểm", e); }
+        } catch(e) { console.error("Lỗi lấy điểm:", e); }
 
-        // Tỷ lệ chuyên cần (30 ngày qua)
         let attendanceRate = 100;
         try {
             const attendanceRes = await pool.query(`SELECT status FROM attendance WHERE student_id = $1 AND date >= NOW() - INTERVAL '30 days'`, [studentId]);
@@ -35,14 +35,13 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
                 const presentSessions = attendances.filter(a => a.status === 'PRESENT').length;
                 attendanceRate = Math.round((presentSessions / attendances.length) * 100);
             }
-        } catch(e) { console.error("Lỗi lấy chuyên cần", e); }
+        } catch(e) { console.error("Lỗi lấy chuyên cần:", e); }
 
-        // Chuyên đề yếu
         let weakTopics: any[] = [];
         try {
             const topicsRes = await pool.query(`SELECT topic, accuracy_rate FROM student_topic_performance WHERE student_id = $1 ORDER BY accuracy_rate ASC LIMIT 5`, [studentId]);
             weakTopics = topicsRes.rows;
-        } catch(e) { console.error("Lỗi lấy chuyên đề yếu", e); }
+        } catch(e) { console.error("Lỗi lấy chuyên đề yếu:", e); }
 
         res.status(200).json({
             profile,
@@ -63,9 +62,9 @@ export const getSchedule = async (req: AuthRequest, res: Response): Promise<void
             return;
         }
 
-        // Sửa query bảng sessions thay vì class_members thành enrollments
+        // Bỏ end_time giả mạo, chỉ lấy start_time
         const query = `
-            SELECT s.id, s.session_date, s.start_time, s.end_time, c.name as class_name, c.subject
+            SELECT s.id, s.session_date, s.start_time, c.name as class_name, c.subject
             FROM sessions s
             JOIN classes c ON s.class_id = c.id
             JOIN enrollments e ON e.class_id = c.id
@@ -73,7 +72,6 @@ export const getSchedule = async (req: AuthRequest, res: Response): Promise<void
             ORDER BY s.session_date ASC, s.start_time ASC
             LIMIT 10
         `;
-        console.log("Query Lịch:", query);
         const result = await pool.query(query, [studentId]);
         res.status(200).json(result.rows);
     } catch (error) {
@@ -90,16 +88,17 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
             return;
         }
 
-        // Truy vấn từ bảng documents, join enrollments
+        // Đã cập nhật database: documents có class_id.
+        // Chỉ lấy tài liệu được gán cho lớp của học sinh đó.
         const query = `
-            SELECT d.id, d.title, d.type, d.file_url, d.created_at, c.name as class_name
+            SELECT d.id, d.title, d.category AS type, d.file_url, d.uploaded_at AS created_at, c.name as class_name, NULL AS due_at
             FROM documents d
             JOIN classes c ON d.class_id = c.id
             JOIN enrollments e ON e.class_id = c.id
-            WHERE e.student_id = $1
-            ORDER BY d.created_at DESC
+            WHERE e.student_id = $1 AND d.class_id IS NOT NULL
+            ORDER BY d.uploaded_at DESC
+            LIMIT 20
         `;
-        console.log("Query Tài Liệu:", query);
         const result = await pool.query(query, [studentId]);
         res.status(200).json(result.rows);
     } catch (error) {
