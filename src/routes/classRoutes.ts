@@ -20,24 +20,24 @@ const router = Router();
 
 router.get('/', verifyToken, getClasses);
 router.get('/:id', verifyToken, getClass);
-router.post('/', verifyToken, isAdmin, createClass);
-router.put('/:id', verifyToken, isAdmin, updateClass);
-router.delete('/:id', verifyToken, isAdmin, deleteClass);
-router.put('/:id/assign-teacher', verifyToken, isAdmin, assignTeacher);
+router.post('/', verifyToken, createClass);
+router.put('/:id', verifyToken, updateClass);
+router.delete('/:id', verifyToken, deleteClass);
+router.put('/:id/assign-teacher', verifyToken, assignTeacher);
 
 // ==========================================
 // API MỚI CHO PHASE 1 - CORE
 // ==========================================
 
 router.get('/:id/members', verifyToken, getClassMembers);
-router.post('/:id/members', verifyToken, isAdmin, addMember);
+router.post('/:id/members', verifyToken, addMember);
 
 router.get('/:id/sessions', verifyToken, getClassSessions);
-router.post('/:id/sessions', verifyToken, isAdmin, createSession);
+router.post('/:id/sessions', verifyToken, createSession);
 
 router.get('/:id/assignments', verifyToken, getClassAssignments);
 
 router.get('/sessions/:id/attendance', verifyToken, getSessionAttendance);
-router.put('/sessions/:id/attendance', verifyToken, isAdmin, updateAttendance);
+router.put('/sessions/:id/attendance', verifyToken, updateAttendance);
 
 export default router;

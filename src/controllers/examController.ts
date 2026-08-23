@@ -129,12 +129,12 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
 
         // Lưu vào bảng exam_keys kèm context_id tương ứng
         await pool.query(
-            `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content, context_id) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+            `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
              ON CONFLICT (document_id) 
              DO UPDATE SET 
                 part1_key = $3, part2_key = $4, part3_key = $5,
-                allow_view_answers = $6, duration_minutes = $7, exam_content = $8, context_id = $9
+                allow_view_answers = $6, duration_minutes = $7, exam_content = $8
              RETURNING *`,
             [
                 document_id,
@@ -144,8 +144,7 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
                 p3,
                 allow_view_answers,
                 duration_minutes,
-                resolvedExamContent,
-                primaryContextId
+                resolvedExamContent
             ]
         );
 
@@ -622,7 +621,7 @@ export const getExamSubmissions = async (req: AuthRequest, res: Response): Promi
                 es.id,
                 es.document_id,
                 es.student_id,
-                u.username as student_name,
+                s.full_name as student_name,
                 es.total_score,
                 es.part1_score,
                 es.part2_score,
@@ -633,7 +632,7 @@ export const getExamSubmissions = async (req: AuthRequest, res: Response): Promi
                 es.submitted_at,
                 es.time_taken_seconds
              FROM exam_submissions es 
-             JOIN users u ON es.student_id = u.id 
+             JOIN students s ON es.student_id = s.id 
              WHERE es.document_id = $1 
              ORDER BY es.total_score DESC, es.submitted_at DESC`,
             [document_id]
