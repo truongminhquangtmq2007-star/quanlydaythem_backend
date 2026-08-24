@@ -12,10 +12,10 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
 
         // SCHEMA THẬT: students (id, full_name, phone_number, school_name, ...)
         const profileRes = await pool.query(
-            "SELECT id, full_name, phone_number AS phone, school_name AS school, COALESCE(ai_evaluation, 'null'::jsonb) AS ai_evaluation FROM students WHERE id = $1",
+            "SELECT id, full_name, phone_number AS phone, school_name AS school FROM students WHERE id = $1",
             [studentId]
         );
-        const profile = profileRes.rows[0];
+        const profile = { ...profileRes.rows[0], ai_evaluation: null };
 
         // SCHEMA THẬT: exam_submissions dùng "submitted_at" thay vì "created_at"
         let avgScore = 'Chưa có';
@@ -97,11 +97,12 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
         let assignments = [];
         try {
             const docsRes = await pool.query(
-                `SELECT d.id, d.title, d.category AS type, c.class_name
-                FROM documents d
-                JOIN classes c ON d.class_id = c.id
-                JOIN enrollments e ON e.class_id = c.id
-                WHERE e.student_id = $1 AND d.class_id IS NOT NULL
+                `SELECT d.id, d.title, 'EXAM' AS type, c.class_name
+  FROM documents d
+  JOIN folders f ON d.folder_id = f.id
+  JOIN classes c ON f.class_id = c.id
+  JOIN enrollments e ON e.class_id = c.id
+  WHERE e.student_id = $1 AND f.category = 'EXAM'
                 ORDER BY d.uploaded_at DESC
                 LIMIT 5`,
                 [studentId]
@@ -158,11 +159,12 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
 
         // SCHEMA THẬT: classes dùng "class_name". documents dùng "uploaded_at", "category".
         const query = `
-            SELECT d.id, d.title, d.category AS type, d.file_url, d.uploaded_at AS created_at, c.class_name, NULL AS due_at
-            FROM documents d
-            JOIN classes c ON d.class_id = c.id
-            JOIN enrollments e ON e.class_id = c.id
-            WHERE e.student_id = $1 AND d.class_id IS NOT NULL
+            SELECT d.id, d.title, 'EXAM' AS type, d.file_url, d.uploaded_at AS created_at, c.class_name, NULL AS due_at
+  FROM documents d
+  JOIN folders f ON d.folder_id = f.id
+  JOIN classes c ON f.class_id = c.id
+  JOIN enrollments e ON e.class_id = c.id
+  WHERE e.student_id = $1 AND f.category = 'EXAM'
             ORDER BY d.uploaded_at DESC
             LIMIT 20
         `;

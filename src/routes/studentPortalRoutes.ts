@@ -7,6 +7,7 @@ const router = Router();
 router.get('/dashboard', verifyToken, getDashboard);
 router.get('/schedule', verifyToken, getSchedule);
 router.get('/documents', verifyToken, getDocuments);
+router.get('/exams', verifyToken, getDocuments);
 
 export default router;
 

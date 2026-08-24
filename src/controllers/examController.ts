@@ -14,10 +14,16 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
     try {
         // NHẬN THÊM BIẾN exam_content TỪ FRONTEND
         const { document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content } = req.body;
-        const documentCheck = await pool.query(
-            'SELECT id FROM documents WHERE id = $1',
-            [document_id]
-        );
+        
+        const documentCheck = await pool.query('SELECT id FROM documents WHERE id = $1', [document_id]);
+        
+        const folderCheck = await pool.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
+        if (folderCheck.rows.length === 0) {
+            res.status(400).json({ message: 'Lớp học này chưa có thư mục Đề thi (EXAM). Vui lòng tạo thư mục trước.' });
+            return;
+        }
+        await pool.query('UPDATE documents SET folder_id = $1 WHERE id = $2', [folderCheck.rows[0].id, document_id]);
+
 
         if (documentCheck.rows.length === 0) {
             res.status(400).json({

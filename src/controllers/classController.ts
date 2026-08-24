@@ -43,29 +43,24 @@ export const getClass = async (req: Request, res: Response): Promise<void> => {
 
 // 2. Thêm lớp học mới (POST) - Cập nhật Schema Lõi
 export const createClass = async (req: AuthRequest, res: Response): Promise<void> => {
-  const { class_code, name, class_name, subject, grade, max_students, teacher_id, description, class_type, meet_link } = req.body; 
-  const finalName = name || class_name; // Hỗ trợ cả ứng dụng cũ (class_name)
+  const { class_name, name, description, class_type, meet_link, schedule, tuition_fee } = req.body; 
+  const finalName = class_name || name;
+  const teacherId = req.user?.id;
+  
+  if (!finalName) {
+    res.status(400).json({ message: 'Tên lớp học là bắt buộc' });
+    return;
+  }
   
   try {
-    // Cố gắng insert với Schema mới (PHASE 1 CORE)
     const result = await pool.query(
-      `INSERT INTO classes (class_code, name, subject, grade, teacher_id, max_students, class_type, meet_link) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [class_code, finalName, subject, grade, teacher_id || null, max_students || 20, class_type || 'OFFLINE', meet_link || null] 
+      'INSERT INTO classes (class_name, description, teacher_id, class_type, meet_link, schedule, tuition_fee) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [finalName, description || null, teacherId, class_type || 'OFFLINE', meet_link || null, schedule || null, tuition_fee || null] 
     );
     res.status(201).json(result.rows[0]);
-  } catch (error: any) {
-    // Fallback: Nếu CSDL chưa chạy lệnh initCore (thiếu cột), thử insert theo schema cũ
-    try {
-      const fallback = await pool.query(
-        `INSERT INTO classes (class_name, description, teacher_id) VALUES ($1, $2, $3) RETURNING *`,
-        [finalName, description, teacher_id || null] 
-      );
-      res.status(201).json(fallback.rows[0]);
-    } catch(e) {
-      console.error(error, e);
-      res.status(500).json({ message: "Lỗi server khi tạo lớp" });
-    }
+  } catch (error) {
+    console.error('Lỗi createClass:', error);
+    res.status(500).json({ message: 'Lỗi server khi tạo lớp' });
   }
 };
 
