@@ -9,10 +9,14 @@ import { AuthRequest } from '../middleware/authMiddleware';
 
 export const createFolder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { name, parent_id } = req.body;
+    const { name, parent_id, category } = req.body;
+    if (!category || !['STORAGE', 'EXAM'].includes(category)) {
+      res.status(400).json({ error: 'category bắt buộc là STORAGE hoặc EXAM' });
+      return;
+    }
     const result = await pool.query(
-      'INSERT INTO folders (name, parent_id, created_at) VALUES ($1, $2, NOW()) RETURNING *',
-      [name, parent_id || null]
+      'INSERT INTO folders (name, parent_id, category, created_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
+      [name, parent_id || null, category]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {

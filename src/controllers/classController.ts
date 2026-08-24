@@ -156,12 +156,21 @@ export const getClassSessions = async (req: Request, res: Response): Promise<voi
 export const getSessionAttendance = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params; // session_id
+    // 1. Get session info
+    const sessionRes = await pool.query('SELECT class_id, session_date FROM sessions WHERE id = $1', [id]);
+    if (sessionRes.rows.length === 0) {
+      res.status(404).json({ message: "Không tìm thấy buổi học" });
+      return;
+    }
+    const { class_id, session_date } = sessionRes.rows[0];
+
+    // 2. Query attendance
     const result = await pool.query(
-      `SELECT a.*, s.full_name, s.student_code 
+      `SELECT a.*, s.full_name, s.id as student_code
        FROM attendance a 
        JOIN students s ON a.student_id = s.id 
-       WHERE a.session_id = $1 ORDER BY s.full_name`,
-      [id]
+       WHERE a.class_id = $1 AND a.attendance_date = $2 ORDER BY s.full_name`,
+      [class_id, session_date]
     );
     res.json(result.rows);
   } catch (err) {
@@ -236,15 +245,35 @@ export const updateAttendance = async (req: Request, res: Response): Promise<voi
   const { id } = req.params; // session_id
   const { student_id, status, note } = req.body;
   try {
-    const result = await pool.query(
-      `UPDATE attendance SET status = $1, note = $2 
-       WHERE session_id = $3 AND student_id = $4 RETURNING *`,
-      [status, note, id, student_id]
-    );
-    if (result.rows.length === 0) {
-      res.status(404).json({ message: "Không tìm thấy bản ghi điểm danh" });
+    // 1. Lấy thông tin session
+    const sessionRes = await pool.query('SELECT class_id, session_date FROM sessions WHERE id = $1', [id]);
+    if (sessionRes.rows.length === 0) {
+      res.status(404).json({ message: "Không tìm thấy buổi học" });
       return;
     }
+    const { class_id, session_date } = sessionRes.rows[0];
+
+    // 2. Upsert điểm danh do không có session_id
+    const checkRes = await pool.query(
+      'SELECT id FROM attendance WHERE class_id = $1 AND attendance_date = $2 AND student_id = $3',
+      [class_id, session_date, student_id]
+    );
+
+    let result;
+    if (checkRes.rows.length > 0) {
+      result = await pool.query(
+        `UPDATE attendance SET status = $1, notes = $2 
+         WHERE class_id = $3 AND attendance_date = $4 AND student_id = $5 RETURNING *`,
+        [status, note, class_id, session_date, student_id]
+      );
+    } else {
+      result = await pool.query(
+        `INSERT INTO attendance (class_id, attendance_date, student_id, status, notes) 
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [class_id, session_date, student_id, status, note]
+      );
+    }
+
     res.status(200).json({ message: "Cập nhật điểm danh thành công", attendance: result.rows[0] });
   } catch (error) {
     console.error(error);

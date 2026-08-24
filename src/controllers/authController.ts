@@ -92,9 +92,13 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
   try {
     const query = `
       SELECT u.id, u.username, u.password_hash, u.full_name, u.student_id, u.title 
-      FROM users u
-      LEFT JOIN students s ON u.student_id = s.id
-      WHERE (u.username = $1 OR s.phone_number = $1) AND u.role = 'STUDENT'
+        FROM users u
+        LEFT JOIN students s ON u.student_id = s.id
+        WHERE (u.username = $1 OR s.phone_number = $1) AND u.role = 'STUDENT'
+        UNION
+        SELECT s.id, s.username, s.password as password_hash, s.full_name, s.id as student_id, 'Học sinh' as title
+        FROM students s
+        WHERE (s.username = $1 OR s.phone_number = $1) AND s.password IS NOT NULL
     `;
     console.log("Executing SQL Query:", query, "Params:", [identifier]);
     const result = await pool.query(query, [identifier]);
