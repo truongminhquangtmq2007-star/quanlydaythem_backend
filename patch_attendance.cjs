@@ -33,3 +33,4 @@ code = code.replace(
 // Let's check updateAttendance first
 fs.writeFileSync('src/controllers/classController.ts', code);
 console.log('Fixed getSessionAttendance');
+

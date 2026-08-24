@@ -15,3 +15,4 @@ code = code.replace(
 
 fs.writeFileSync('src/controllers/assignmentController.ts', code);
 console.log('Fixed assignmentController');
+

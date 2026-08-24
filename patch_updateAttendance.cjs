@@ -46,3 +46,4 @@ code = code.replace(
 
 fs.writeFileSync('src/controllers/classController.ts', code);
 console.log('Fixed updateAttendance');
+

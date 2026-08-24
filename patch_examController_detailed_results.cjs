@@ -8,3 +8,4 @@ code = code.replace(/student_answers, detailed_results FROM/g, "student_answers,
 
 fs.writeFileSync('src/controllers/examController.ts', code);
 console.log('Fixed detailed_results');
+

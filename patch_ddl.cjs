@@ -19,3 +19,4 @@ code = code.replace(/try \{\s*await pool\.query\(`ALTER TABLE exam_submissions A
 
 fs.writeFileSync('src/controllers/examController.ts', code);
 console.log('Cleaned up DDL statements');
+

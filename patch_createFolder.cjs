@@ -18,3 +18,4 @@ code = code.replace(
 
 fs.writeFileSync('src/controllers/documentController.ts', code);
 console.log('Fixed createFolder API');
+

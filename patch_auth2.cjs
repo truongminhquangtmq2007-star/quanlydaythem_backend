@@ -15,3 +15,4 @@ code = code.replace(
 
 fs.writeFileSync('src/controllers/authController.ts', code);
 console.log('Fixed authController with regex');
+
