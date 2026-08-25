@@ -759,73 +759,20 @@ export const getAllExams = async (req: AuthRequest, res: Response): Promise<void
 // ========================================================
 // 9. API PHASE 3: XUẤT BẢN ĐỀ THI (PUBLISH EXAM)
 // ========================================================
+
 export const publishExam = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { document_id, title, grade, subject, duration_minutes, questions, contexts } = req.body;
-        
-        // Bắt đầu Transaction
-        await pool.query('BEGIN');
-
-        // 1. Lưu vào bảng exams
-        const examRes = await pool.query(
-            `INSERT INTO exams (document_id, title, grade, subject, duration_minutes, status) 
-             VALUES ($1, $2, $3, $4, $5, 'PUBLISHED') RETURNING id`,
-            [document_id, title, grade, subject, duration_minutes || 60]
-        );
-        const examId = examRes.rows[0].id;
-
-        // 2. Lưu Contexts (nếu có)
-        const contextMap: Record<number, number> = {}; // { tempId: realId }
-        if (contexts && contexts.length > 0) {
-            for (let i = 0; i < contexts.length; i++) {
-                const ctx = contexts[i];
-                const ctxRes = await pool.query(
-                    `INSERT INTO question_contexts (exam_id, content, image_url) 
-                     VALUES ($1, $2, $3) RETURNING id`,
-                    [examId, ctx.content, ctx.image_url || null]
-                );
-                // Giả sử frontend gửi kèm id tạm thời (temp_id) để map
-                if (ctx.temp_id) {
-                    contextMap[ctx.temp_id] = ctxRes.rows[0].id;
-                }
-            }
-        }
-
-        // 3. Lưu Questions & Options
-        if (questions && questions.length > 0) {
-            for (let i = 0; i < questions.length; i++) {
-                const q = questions[i];
-                const realContextId = q.context_temp_id ? contextMap[q.context_temp_id] : null;
-
-                const qRes = await pool.query(
-                    `INSERT INTO questions (exam_id, context_id, content, question_type, difficulty, topic, raw_latex, order_index) 
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-                    [examId, realContextId, q.content, q.question_type || 'MCQ', q.difficulty || 'MEDIUM', q.topic || null, q.raw_latex || null, i]
-                );
-                const qId = qRes.rows[0].id;
-
-                // Options
-                if (q.options && q.options.length > 0) {
-                    for (let j = 0; j < q.options.length; j++) {
-                        const opt = q.options[j];
-                        await pool.query(
-                            `INSERT INTO question_options (question_id, content, is_correct, order_index) 
-                             VALUES ($1, $2, $3, $4)`,
-                            [qId, opt.content, opt.is_correct || false, j]
-                        );
-                    }
-                }
-            }
-        }
-
-        await pool.query('COMMIT');
-        res.status(201).json({ message: 'Xuất bản đề thi thành công!', exam_id: examId });
+        // Trong hệ thống thực tế, Đề thi đã được lưu vào bảng documents với category='EXAM',
+        // và nội dung JSON được lưu vào bảng exam_keys qua hàm saveAnswerKey.
+        // Vì vậy không cần insert vào các bảng ảo exams, question_contexts, questions.
+        // Chỉ cần trả về 200 OK.
+        res.status(200).json({ message: 'Xuất bản đề thi thành công!' });
     } catch (error) {
-        await pool.query('ROLLBACK');
         console.error('Lỗi publish đề:', error);
         res.status(500).json({ message: 'Lỗi xuất bản đề thi' });
     }
 };
+
 
 import { GoogleGenAI } from '@google/genai';
 

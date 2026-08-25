@@ -47,6 +47,16 @@ export const getStudentTopics = async (req: AuthRequest, res: Response): Promise
 export const getClassWeakTopics = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
+        const user = req.user;
+
+        // Kiểm tra quyền (TEACHER chỉ được xem lớp của mình)
+        if (user && user.role === 'TEACHER') {
+            const classRes = await pool.query('SELECT teacher_id FROM classes WHERE id = $1', [id]);
+            if (classRes.rows.length === 0 || classRes.rows[0].teacher_id !== user.id) {
+                res.status(403).json({ message: 'Bạn không có quyền xem dữ liệu lớp học này.' });
+                return;
+            }
+        }
 
         // Thử query bảng thật trước
         try {
