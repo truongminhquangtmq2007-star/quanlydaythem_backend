@@ -13,3 +13,4 @@ const router = Router();
 router.post('/image', verifyToken, isTeacherOrAdmin, uploadImage);
 
 export default router;
+

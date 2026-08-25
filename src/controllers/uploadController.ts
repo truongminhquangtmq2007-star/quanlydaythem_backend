@@ -44,3 +44,4 @@ export const uploadImage = (req: Request, res: Response) => {
         res.status(200).json({ url: req.file.path });
     });
 };
+
