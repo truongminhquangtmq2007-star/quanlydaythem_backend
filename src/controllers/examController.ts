@@ -671,8 +671,13 @@ export const createExamFromText = async (req: AuthRequest, res: Response): Promi
         examContent: fullExam, 
       });
     } catch (error: any) {
-      console.error('Lỗi bóc tách đề bằng AI:', error);
-      res.status(500).json({ message: 'Lỗi bóc tách đề', detail: error.message });
+        console.error('Lỗi nhận và xử lý file:', error);
+        const errMessage = String(error.message || error);
+        if (errMessage.includes('fetch failed') || errMessage.includes('TIMEOUT') || errMessage.includes('timeout')) {
+            res.status(504).json({ status: "error", message: "File quá dài hoặc AI đang quá tải, phản hồi quá lâu. Vui lòng chia nhỏ file hoặc thử lại sau." });
+            return;
+        }
+        res.status(500).json({ message: 'Lỗi server khi AI xử lý file', detail: error.message });
     }
 };
 
