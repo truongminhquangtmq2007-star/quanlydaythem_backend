@@ -42,3 +42,4 @@ export const uploadDocument = (req: Request, res: Response) => {
 code += '\n' + newCode;
 fs.writeFileSync('src/controllers/uploadController.ts', code);
 console.log('Added uploadDocument');
+
