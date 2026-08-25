@@ -45,3 +45,12 @@ export const isAdmin = (req: AuthRequest, res: Response, next: NextFunction): vo
     res.status(403).json({ message: "Từ chối truy cập! Chức năng này chỉ dành cho Ban Giám Đốc." });
   }
 };
+
+export const isTeacherOrAdmin = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  const user = req.user;
+  if (user && (user.role === 'ADMIN' || user.role === 'TEACHER')) {
+    next();
+  } else {
+    res.status(403).json({ message: 'Từ chối truy cập! Chức năng này chỉ dành cho Giáo viên hoặc Admin.' });
+  }
+};

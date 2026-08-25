@@ -16,23 +16,31 @@ export interface AuthRequest extends Request {
 export const getStudents = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { search, grade } = req.query;
-    let query = 'SELECT * FROM students WHERE (is_active = TRUE OR is_active IS NULL)';
+    let query = 'SELECT DISTINCT s.* FROM students s ';
     const values: any[] = [];
     let count = 1;
+    
+    if (req.user && req.user.role === 'TEACHER') {
+        query += ' JOIN enrollments e ON s.id = e.student_id JOIN classes c ON e.class_id = c.id WHERE c.teacher_id = $' + count + ' AND (s.is_active = TRUE OR s.is_active IS NULL) ';
+        values.push(req.user.id);
+        count++;
+    } else {
+        query += ' WHERE (s.is_active = TRUE OR s.is_active IS NULL) ';
+    }
 
     if (search) {
-      query += ` AND full_name ILIKE $${count}`;
+      query += ` AND s.full_name ILIKE $${count}`;
       values.push(`%${search}%`);
       count++;
     }
 
     if (grade && grade !== 'ALL') {
-      query += ` AND grade = $${count}`;
+      query += ` AND s.grade = $${count}`;
       values.push(grade);
       count++;
     }
 
-    query += ' ORDER BY created_at DESC';
+    query += ' ORDER BY s.created_at DESC';
 
     const result = await pool.query(query, values);
     res.status(200).json(result.rows);

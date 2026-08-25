@@ -143,21 +143,30 @@ export const getDrive = async (req: AuthRequest, res: Response): Promise<void> =
   try {
     const { category, class_id } = req.query;
     // Just a placeholder to return folders and docs matching conditions
-    let foldersQuery = 'SELECT * FROM folders WHERE 1=1';
-    let docsQuery = 'SELECT * FROM documents WHERE 1=1';
+    let foldersQuery = 'SELECT f.* FROM folders f ';
+    let docsQuery = 'SELECT d.* FROM documents d ';
     const params: any[] = [];
     let paramIdx = 1;
+    if (req.user && req.user.role === 'TEACHER') {
+        foldersQuery += ' LEFT JOIN classes c ON f.class_id = c.id WHERE (c.teacher_id = $' + paramIdx + ') ';
+        docsQuery += ' LEFT JOIN folders fd ON d.folder_id = fd.id LEFT JOIN classes c2 ON fd.class_id = c2.id WHERE (c2.teacher_id = $' + paramIdx + ' OR d.teacher_id = $' + paramIdx + ') ';
+        params.push(req.user.id);
+        paramIdx++;
+    } else {
+        foldersQuery += ' WHERE 1=1 ';
+        docsQuery += ' WHERE 1=1 ';
+    }
 
     if (category) {
-      foldersQuery += ` AND category = $${paramIdx}`;
-      docsQuery += ` AND category = $${paramIdx}`;
+      foldersQuery += ` AND f.category = $${paramIdx}`;
+      docsQuery += ` AND d.category = $${paramIdx}`;
       params.push(category);
       paramIdx++;
     }
 
     if (class_id) {
-      foldersQuery += ` AND class_id = $${paramIdx}`;
-      docsQuery += ` AND class_id = $${paramIdx}`;
+      foldersQuery += ` AND f.class_id = $${paramIdx}`;
+      docsQuery += ` AND d.folder_id IN (SELECT id FROM folders WHERE class_id = $${paramIdx})`;
       params.push(class_id);
       paramIdx++;
     }

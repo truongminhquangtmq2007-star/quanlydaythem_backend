@@ -19,6 +19,7 @@ import assignmentRoutes from './routes/assignmentRoutes';
 import analyticsRoutes from './routes/analyticsRoutes';
 import aiRoutes from './routes/aiRoutes';
 import reportRoutes from './routes/reportRoutes';
+import uploadRoutes from './routes/uploadRoutes';
 import studentPortalRoutes from './routes/studentPortalRoutes';
 
 console.log("Danh sách các file đang có ở thư mục gốc:", fs.readdirSync(process.cwd()));
@@ -53,6 +54,7 @@ app.use('/api/assignments', assignmentRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/upload', uploadRoutes);
 app.use('/api/student', studentPortalRoutes);
 
 // Đường dẫn gốc

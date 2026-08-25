@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { verifyToken, isAdmin } from '../middleware/authMiddleware';
+import { verifyToken, isAdmin, isTeacherOrAdmin } from '../middleware/authMiddleware';
 import { 
     saveAnswerKey, 
     submitExam, 
@@ -18,8 +18,8 @@ import { uploadMemory } from '../middleware/uploadMiddleware';
 const router = Router();
 
 // Phase 3 Routes (Exam Engine)
-router.get('/', verifyToken, isAdmin, getAllExams);
-router.post('/publish', verifyToken, isAdmin, publishExam);
+router.get('/', verifyToken, isTeacherOrAdmin, getAllExams);
+router.post('/publish', verifyToken, isTeacherOrAdmin, publishExam);
 
 // Cấu hình Multer lưu file tạm vào RAM (bộ nhớ đệm)
 const upload = multer({ storage: multer.memoryStorage() });

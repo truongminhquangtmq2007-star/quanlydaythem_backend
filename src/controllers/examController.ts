@@ -734,12 +734,21 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
 // ========================================================
 export const getAllExams = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const result = await pool.query(`
+        const user = req.user;
+        let query = `
             SELECT e.*, d.file_url 
             FROM exams e 
-            LEFT JOIN documents d ON e.document_id = d.id 
-            ORDER BY e.created_at DESC
-        `);
+            LEFT JOIN documents d ON e.document_id = d.id
+        `;
+        const values = [];
+        if (user && user.role === 'TEACHER') {
+            // Assume exams has teacher_id or documents has teacher_id
+            query += ` WHERE d.teacher_id = $1 `;
+            values.push(user.id);
+        }
+        query += ` ORDER BY e.created_at DESC`;
+        
+        const result = await pool.query(query, values);
         res.status(200).json(result.rows);
     } catch (error) {
         console.error(error);
