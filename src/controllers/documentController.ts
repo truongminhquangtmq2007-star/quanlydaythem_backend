@@ -85,10 +85,13 @@ export const getFolderContents = async (req: AuthRequest, res: Response): Promis
 
 export const addDocument = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { title, file_url, folder_id } = req.body;
+    const { title, file_url, folder_id, category } = req.body;
+    const teacherId = req.user?.id;
+    const docCategory = category || 'STORAGE';
+    
     const result = await pool.query(
-      'INSERT INTO documents (title, file_url, folder_id, uploaded_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
-      [title, file_url, folder_id || null]
+      'INSERT INTO documents (title, file_url, folder_id, category, teacher_id, uploaded_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *',
+      [title, file_url, folder_id || null, docCategory, teacherId || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {

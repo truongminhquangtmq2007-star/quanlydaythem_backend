@@ -27,15 +27,21 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
   }
 };
 
-export const getClass = async (req: Request, res: Response): Promise<void> => {
+export const getClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    const user = req.user;
     const result = await pool.query('SELECT * FROM classes WHERE id = $1', [id]);
     if (result.rows.length === 0) {
       res.status(404).json({ message: "Không tìm thấy lớp học" });
       return;
     }
-    res.status(200).json(result.rows[0]);
+    const classData = result.rows[0];
+    if (user && user.role === 'TEACHER' && classData.teacher_id !== user.id) {
+      res.status(403).json({ message: "Bạn không có quyền xem lớp học này." });
+      return;
+    }
+    res.status(200).json(classData);
   } catch (error) {
     res.status(500).json({ message: "Lỗi server" });
   }
