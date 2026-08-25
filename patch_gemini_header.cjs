@@ -21,3 +21,4 @@ if (!code.includes('const ai = new GoogleGenAI')) {
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log('Restored top of geminiService');
+
