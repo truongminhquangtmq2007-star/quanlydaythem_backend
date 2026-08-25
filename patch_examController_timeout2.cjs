@@ -16,3 +16,4 @@ code = code.replace(/catch \(error: any\) \{\s*console\.error\([^,]+, error\);\s
 
 fs.writeFileSync('src/controllers/examController.ts', code);
 console.log('Patched examController with regex');
+

@@ -13,3 +13,4 @@ code = code.replace(
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log('Patched GoogleGenAI');
+

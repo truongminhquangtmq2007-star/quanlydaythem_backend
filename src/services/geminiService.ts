@@ -1,17 +1,4 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import { TAXONOMIES } from '../constants/taxonomies';
-import dotenv from 'dotenv';
-
-dotenv.config();
-
-// Khởi tạo Gemini AI với API Key trong file .env
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || '',
-});
-
-// ==========================================
-// ĐỊNH NGHĨA CẤU TRÚC ĐỀ THI
-// ==========================================
 export interface MultipleChoiceQuestion {
   id: number;
   questionText: string;
