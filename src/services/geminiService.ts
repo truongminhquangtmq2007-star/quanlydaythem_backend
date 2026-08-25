@@ -1,4 +1,13 @@
 import { GoogleGenAI, Type } from '@google/genai';
+import { TAXONOMIES } from '../constants/taxonomies';
+import dotenv from 'dotenv';
+dotenv.config();
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || '',
+  httpOptions: { timeout: 90000 }
+});
+
 export interface MultipleChoiceQuestion {
   id: number;
   questionText: string;
