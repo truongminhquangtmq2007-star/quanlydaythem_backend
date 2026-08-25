@@ -25,3 +25,4 @@ if (code.includes('INSERT INTO exams (document_id, title')) {
 
 fs.writeFileSync('src/controllers/examController.ts', code);
 console.log('Patched publishExam');
+
