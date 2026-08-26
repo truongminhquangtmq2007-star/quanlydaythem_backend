@@ -76,3 +76,4 @@ export const assignDocumentsToClass = async (req: AuthRequest, res: Response): P
     client.release();
   }
 };
+

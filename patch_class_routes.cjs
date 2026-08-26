@@ -14,3 +14,4 @@ code = code.replace("export default router;", newRoutes + "\nexport default rout
 
 fs.writeFileSync('src/routes/classRoutes.ts', code);
 console.log("Patched classRoutes.");
+
