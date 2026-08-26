@@ -1,7 +1,20 @@
-import { GoogleGenAI, Type } from '@google/genai';
-import { TAXONOMIES } from '../constants/taxonomies';
-import dotenv from 'dotenv';
+import { GoogleGenAI, Type, Schema } from '@google/genai';
+import * as dotenv from 'dotenv';
+const pdfParse = require('pdf-parse');
+import mammoth from 'mammoth';
+
 dotenv.config();
+
+const MAX_RETRIES_PER_MODEL = 3;
+
+const MODEL_FALLBACK_CHAIN = [
+  'gemini-3.7-flash', 
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.1-pro-preview',
+  'gemini-2.5-flash',
+  'gemini-1.5-flash'
+];
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || '',
@@ -164,14 +177,9 @@ const examResponseSchema = {
 // ==========================================
 // CƠ CHẾ TỰ ĐỘNG THỬ LẠI (RETRY) KHI GEMINI QUÁ TẢI
 // ==========================================
-const MODEL_FALLBACK_CHAIN = [
-  'gemini-3.7-flash',           // Mạnh nhất
-  'gemini-3.6-flash',  // Nhanh, ổn định
-  'gemini-3.5-flash',         // Dự phòng flash
-  'gemini-3.1-pro-preview',         // Thế hệ trước, dự phòng
-];
 
-const MAX_RETRIES_PER_MODEL = 3;
+
+
 const BASE_DELAY_MS = 2000;
 
 function isRetryableError(error: any): boolean {
@@ -191,16 +199,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+
 async function callGeminiWithRetry(contents: any): Promise<string> {
   let lastError: any = null;
 
-  for (const model of MODEL_FALLBACK_CHAIN) {
+  for (const modelName of MODEL_FALLBACK_CHAIN) {
     for (let attempt = 1; attempt <= MAX_RETRIES_PER_MODEL; attempt++) {
       try {
-        console.log(`🔄 Đang gọi Gemini [model: ${model}, lần thử: ${attempt}/${MAX_RETRIES_PER_MODEL}]...`);
-
+        console.log(`🔄 Đang thử gọi AI với model: ${modelName} (Lần ${attempt})...`);
         const response = await ai.models.generateContent({
-          model,
+          model: modelName,
           contents,
           config: {
             responseMimeType: 'application/json',
@@ -208,35 +216,93 @@ async function callGeminiWithRetry(contents: any): Promise<string> {
           },
         });
 
-        if (!response.text) {
-          throw new Error('Gemini không trả về dữ liệu (response rỗng)');
+        if (response.text) {
+          return response.text;
+        } else {
+            throw new Error('Gemini không trả về dữ liệu (response rỗng)');
         }
-
-        console.log(`✅ Gọi Gemini thành công với model: ${model}`);
-        return response.text;
       } catch (error: any) {
         lastError = error;
-
-        if (!isRetryableError(error)) {
-          console.error(`❌ Lỗi không thể thử lại [model: ${model}]:`, error.message);
-          throw error;
+        console.warn(`⚠️ Model [${modelName}] thất bại: ${error.message}`);
+        
+        if (error.status === 504 || error.status === 429 || error.message.includes('504') || error.message.includes('TIMEOUT') || error.message.includes('fetch failed')) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        } else {
+            break; // If not a timeout/ratelimit, move to next model immediately or throw? Wait, the prompt says "Nếu lỗi 504 hoặc 429, delay... Tiếp tục vòng lặp sang model dự phòng" 
+            // So we just break the attempt loop to move to the next model!
+            break;
         }
-
-        const delay = BASE_DELAY_MS * attempt;
-        console.warn(`⚠️ Model [${model}] bị quá tải/hết quota. Chờ ${delay / 1000}s rồi thử lại...`);
-        await sleep(delay);
       }
     }
-    console.warn(`⛔ Model [${model}] đã thử hết ${MAX_RETRIES_PER_MODEL} lần vẫn lỗi. Chuyển sang model dự phòng...`);
   }
-
-  console.error('❌ Đã thử hết toàn bộ model dự phòng nhưng vẫn thất bại.');
-  throw lastError;
+  
+  throw new Error("Tất cả các model AI đều thất bại hoặc quá tải. Lỗi cuối cùng: " + lastError.message);
 }
+
+async function extractTextFromBuffer(buffer: Buffer, mimetype: string): Promise<string> {
+    if (mimetype === 'application/pdf') {
+        const data = await pdfParse(buffer);
+        return data.text;
+    } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || mimetype === 'application/msword') {
+        const result = await mammoth.extractRawText({ buffer });
+        return result.value;
+    } else if (mimetype.startsWith('image/')) {
+        // Use Gemini to extract text from image
+        let lastError = null;
+        for (const modelName of MODEL_FALLBACK_CHAIN) {
+            try {
+                const response = await ai.models.generateContent({
+                    model: modelName,
+                    contents: [
+                        "Hãy trích xuất toàn bộ văn bản trong bức ảnh này một cách chính xác nhất.",
+                        { inlineData: { data: buffer.toString('base64'), mimeType: mimetype } }
+                    ]
+                });
+                if (response.text) return response.text;
+            } catch(e: any) {
+                lastError = e;
+            }
+        }
+        return "Không thể trích xuất văn bản từ ảnh.";
+    }
+    return buffer.toString('utf8');
+}
+
+function chunkText(text: string): string[] {
+    const regex = /(Câus+d+[:.])/gi;
+    let match;
+    const indices = [];
+    while ((match = regex.exec(text)) !== null) {
+        indices.push(match.index);
+    }
+
+    if (indices.length <= 10) return [text];
+
+    const chunks: string[] = [];
+    let currentChunkStartIndex = 0;
+    
+    for (let i = 0; i < indices.length; i += 10) {
+        const chunkEndIndex = i + 10 < indices.length ? indices[i + 10] : text.length;
+        chunks.push(text.slice(currentChunkStartIndex, chunkEndIndex));
+        currentChunkStartIndex = chunkEndIndex;
+    }
+    
+    return chunks;
+}
+
 
 // ==========================================
 // PROMPT CHUẨN DÙNG CHUNG CHO CẢ TEXT VÀ FILE
 // ==========================================
+
+const TAXONOMIES = {
+  "Toán Học": ["Đại Số", "Hình Học", "Lượng Giác", "Giải Tích"],
+  "Vật Lý": ["Cơ Học", "Nhiệt Học", "Điện Từ Học", "Quang Học", "Vật Lý Lượng Tử"],
+  "Hóa Học": ["Vô Cơ", "Hữu Cơ", "Hóa Lý", "Hóa Phân Tích"],
+  "Sinh Học": ["Tế Bào", "Di Truyền", "Tiến Hóa", "Sinh Thái"],
+  "Tiếng Anh": ["Ngữ Pháp", "Từ Vựng", "Đọc Hiểu", "Viết"]
+};
+
 const basePrompt = `
 Bạn là một giáo viên xuất sắc và chuyên gia số hóa đề thi THPT theo cấu trúc chuẩn của Bộ Giáo dục & Đào tạo. 
 Nhiệm vụ: Tự động nhận diện môn học, bóc tách đề thi chuẩn xác và xử lý câu hỏi chùm (Shared Context).
@@ -307,26 +373,35 @@ export async function parseFullExamWithGemini(rawText: string): Promise<FullExam
 // ==========================================
 // 2. HÀM GỌI GEMINI XỬ LÝ TỪ FILE (PDF/ẢNH)
 // ==========================================
-export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File): Promise<FullExamData> => {
-  const contents = [
-    basePrompt,
-    {
-      inlineData: {
-        data: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
-      },
-    },
-  ];
 
+export const parseFullExamFromFileWithGemini = async (file: Express.Multer.File): Promise<FullExamData> => {
   try {
-    const text = await callGeminiWithRetry(contents);
-    const examData: FullExamData = JSON.parse(text);
-    return normalizeExamData(examData);
+    const rawText = await extractTextFromBuffer(file.buffer, file.mimetype);
+    const chunks = chunkText(rawText);
+    
+    const allQuestions: any = { part1: [], part2: [], part3: [], shared_context: [] };
+    
+    for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const contents = `${basePrompt}\n\nNội dung đề thi (Phần ${i+1}/${chunks.length}):\n${chunk}`;
+        
+        const text = await callGeminiWithRetry(contents);
+        const examData: FullExamData = JSON.parse(text);
+        
+        if (examData.part1) allQuestions.part1.push(...examData.part1);
+        if (examData.part2) allQuestions.part2.push(...examData.part2);
+        if (examData.part3) allQuestions.part3.push(...examData.part3);
+        if (examData.shared_context) allQuestions.shared_context.push(...examData.shared_context);
+        if (examData.sharedContexts) allQuestions.shared_context.push(...examData.sharedContexts);
+    }
+
+    return normalizeExamData(allQuestions);
   } catch (error) {
     console.error('Lỗi khi bóc tách file với Gemini:', error);
     throw error;
   }
 };
+
 
 
 export async function generateWithFallback(prompt: string): Promise<string> {
