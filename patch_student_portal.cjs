@@ -39,3 +39,4 @@ if (!code.includes('export const updateEmail')) {
 
 fs.writeFileSync('src/controllers/studentPortalController.ts', code);
 console.log("Patched studentPortalController.");
+

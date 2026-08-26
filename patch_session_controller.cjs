@@ -87,3 +87,4 @@ if (!code.includes('export const syncCalendar')) {
 
 fs.writeFileSync('src/controllers/sessionController.ts', code);
 console.log("Patched sessionController for syncCalendar.");
+

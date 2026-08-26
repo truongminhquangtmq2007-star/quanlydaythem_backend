@@ -36,3 +36,4 @@ const newBlock = `          let actual_document_id = document_id;
 code = code.replace(oldBlock, newBlock);
 fs.writeFileSync('src/controllers/examController.ts', code);
 console.log("Patched document insert logic.");
+

@@ -13,3 +13,4 @@ code = code.replace(
 
 fs.writeFileSync('src/routes/studentPortalRoutes.ts', code);
 console.log("Patched studentPortalRoutes.");
+

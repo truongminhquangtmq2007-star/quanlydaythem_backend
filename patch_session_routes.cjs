@@ -13,3 +13,4 @@ code = code.replace(
 
 fs.writeFileSync('src/routes/sessionRoutes.ts', code);
 console.log("Patched sessionRoutes.");
+

@@ -69,3 +69,4 @@ const createSessionNew = `    // 1. Tạo buổi học
 code = code.replace(createSessionOld, createSessionNew);
 fs.writeFileSync('src/controllers/classController.ts', code);
 console.log("Patched createSession in classController.");
+
