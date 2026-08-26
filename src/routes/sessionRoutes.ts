@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { upsertSession, publishSessions, getSessions, deleteSession, getPublishedSessions, getEvaluations, saveEvaluation, markSessionsAsBilled } from '../controllers/sessionController';
+import { upsertSession, publishSessions, getSessions, deleteSession, getPublishedSessions, getEvaluations, saveEvaluation, markSessionsAsBilled, syncCalendar } from '../controllers/sessionController';
 import { verifyToken } from '../middleware/authMiddleware'; 
 
 const router = Router();
@@ -19,5 +19,7 @@ router.delete('/:id', verifyToken, deleteSession);
 router.get('/evaluations', verifyToken, getEvaluations);
 router.post('/evaluate', verifyToken, saveEvaluation);
 router.post('/mark-billed', verifyToken, markSessionsAsBilled);
+
+router.post('/:id/sync-calendar', verifyToken, syncCalendar);
 
 export default router;

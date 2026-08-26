@@ -12,7 +12,7 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
 
         // SCHEMA THẬT: students (id, full_name, phone_number, school_name, ...)
         const profileRes = await pool.query(
-            "SELECT id, full_name, phone_number AS phone, school_name AS school FROM students WHERE id = $1",
+            "SELECT id, full_name, email, phone_number AS phone, school_name AS school FROM students WHERE id = $1",
             [studentId]
         );
         const profile = { ...profileRes.rows[0], ai_evaluation: null };
@@ -172,6 +172,29 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
         res.status(200).json(result.rows);
     } catch (error) {
         console.error("LỖI getDocuments:", error);
+        res.status(500).json({ message: 'Lỗi server' });
+    }
+};
+
+export const updateEmail = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const studentId = req.user?.student_id;
+        if (!studentId) {
+            res.status(403).json({ message: 'Không có quyền' });
+            return;
+        }
+        const { email } = req.body;
+        
+        // Basic validation
+        if (email && !/^[^s@]+@[^s@]+.[^s@]+$/.test(email)) {
+            res.status(400).json({ message: 'Email không hợp lệ' });
+            return;
+        }
+
+        await pool.query('UPDATE students SET email = $1 WHERE id = $2', [email || null, studentId]);
+        res.status(200).json({ message: 'Cập nhật email thành công' });
+    } catch (error) {
+        console.error("LỖI updateEmail:", error);
         res.status(500).json({ message: 'Lỗi server' });
     }
 };
