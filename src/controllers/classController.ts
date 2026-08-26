@@ -190,7 +190,7 @@ export const addMember = async (req: Request, res: Response): Promise<void> => {
   const { student_id } = req.body;
   try {
     const result = await pool.query(
-      `INSERT INTO class_members (class_id, student_id) VALUES ($1, $2) RETURNING *`,
+      `INSERT INTO enrollments (class_id, student_id) VALUES ($1, $2) RETURNING *`,
       [id, student_id]
     );
     res.status(201).json({ message: "Đã thêm học sinh vào lớp", member: result.rows[0] });
@@ -236,7 +236,7 @@ export const createSession = async (req: Request, res: Response): Promise<void> 
           // Get students emails
           const emailsRes = await client.query(
             `SELECT s.email FROM students s
-             JOIN class_members cm ON s.id = cm.student_id
+             JOIN enrollments cm ON s.id = cm.student_id
              WHERE cm.class_id = $1 AND cm.status = 'ACTIVE' AND s.is_active = true AND s.email IS NOT NULL`,
             [id]
           );
@@ -262,7 +262,7 @@ export const createSession = async (req: Request, res: Response): Promise<void> 
 
     // 2. Lấy danh sách học sinh đang có trong lớp
     const membersRes = await client.query(
-      `SELECT student_id FROM class_members WHERE class_id = $1 AND status = 'ACTIVE'`,
+      `SELECT student_id FROM enrollments WHERE class_id = $1 AND status = 'ACTIVE'`,
       [id]
     );
 

@@ -67,7 +67,7 @@ export const getClassWeakTopics = async (req: AuthRequest, res: Response): Promi
                     SUM(stp.correct_count) as total_corrects,
                     ROUND(CAST(SUM(stp.correct_count) AS NUMERIC) * 100.0 / SUM(stp.attempt_count), 2) as accuracy_rate
                  FROM student_topic_performance stp
-                 JOIN class_members cm ON stp.student_id = cm.student_id
+                 JOIN enrollments cm ON stp.student_id = cm.student_id
                  WHERE cm.class_id = $1 AND cm.status = 'ACTIVE'
                  GROUP BY stp.topic
                  HAVING SUM(stp.attempt_count) > 0

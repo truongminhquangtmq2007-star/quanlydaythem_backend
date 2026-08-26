@@ -97,12 +97,12 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
         let assignments = [];
         try {
             const docsRes = await pool.query(
-                `SELECT d.id, d.title, 'EXAM' AS type, c.class_name
+                `SELECT d.id, d.title, f.category AS type, c.class_name
   FROM documents d
   JOIN folders f ON d.folder_id = f.id
   JOIN classes c ON f.class_id = c.id
   JOIN enrollments e ON e.class_id = c.id
-  WHERE e.student_id = $1 AND f.category = 'EXAM'
+  WHERE e.student_id = $1
                 ORDER BY d.uploaded_at DESC
                 LIMIT 5`,
                 [studentId]
@@ -159,12 +159,12 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
 
         // SCHEMA THẬT: classes dùng "class_name". documents dùng "uploaded_at", "category".
         const query = `
-            SELECT d.id, d.title, 'EXAM' AS type, d.file_url, d.uploaded_at AS created_at, c.class_name, NULL AS due_at
+            SELECT d.id, d.title, f.category AS type, d.file_url, d.uploaded_at AS created_at, c.class_name, NULL AS due_at
   FROM documents d
   JOIN folders f ON d.folder_id = f.id
   JOIN classes c ON f.class_id = c.id
   JOIN enrollments e ON e.class_id = c.id
-  WHERE e.student_id = $1 AND f.category = 'EXAM'
+  WHERE e.student_id = $1
             ORDER BY d.uploaded_at DESC
             LIMIT 20
         `;

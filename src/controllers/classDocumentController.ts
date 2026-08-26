@@ -9,7 +9,7 @@ export const getAssignableDocuments = async (req: AuthRequest, res: Response): P
     // Get documents that belong to folders with NO class_id or class_id = this class
     // Also include documents with NO folder_id (if any)
     const query = `
-      SELECT d.id, d.title, d.category, d.folder_id, f.name AS folder_name, f.class_id AS folder_class_id
+      SELECT d.id, d.title, d.category, d.folder_id, d.file_url, d.uploaded_at AS created_at, f.name AS folder_name, f.class_id AS folder_class_id
       FROM documents d
       LEFT JOIN folders f ON d.folder_id = f.id
       WHERE f.class_id IS NULL OR f.class_id = $1 OR d.folder_id IS NULL

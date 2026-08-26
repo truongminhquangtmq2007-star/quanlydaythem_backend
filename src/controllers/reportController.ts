@@ -19,7 +19,7 @@ export const getWeeklyReport = async (req: AuthRequest, res: Response): Promise<
         let classType = 'OFFLINE';
         let meetLink = '';
         const classRes = await pool.query(
-            `SELECT c.class_type, c.meet_link FROM class_members cm JOIN classes c ON cm.class_id = c.id WHERE cm.student_id = $1 LIMIT 1`, 
+            `SELECT c.class_type, c.meet_link FROM enrollments cm JOIN classes c ON cm.class_id = c.id WHERE cm.student_id = $1 LIMIT 1`, 
             [id]
         );
         if (classRes.rows.length > 0) {

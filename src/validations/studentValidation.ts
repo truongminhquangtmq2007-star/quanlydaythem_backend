@@ -13,12 +13,14 @@ const studentSchema = Joi.object({
     'string.empty': 'Số điện thoại không được để trống.',
     'any.required': 'Bắt buộc phải nhập số điện thoại.'
   }),
-  date_of_birth: Joi.date().iso().optional().messages({
+  date_of_birth: Joi.date().iso().optional().allow(null, '').messages({
     'date.format': 'Ngày sinh phải đúng định dạng (VD: 2007-12-04).'
   }),
-  school_name: Joi.string().optional(),
-  notes: Joi.string().optional()
-});
+  school_name: Joi.string().optional().allow(null, ''),
+  notes: Joi.string().optional().allow(null, ''),
+  email: Joi.string().email().optional().allow(null, ''),
+  password: Joi.string().min(6).optional().allow(null, '')
+}).unknown(true);
 
 // 2. Hàm Middleware để kiểm tra trước khi cho phép lưu vào Database
 export const validateStudent = (req: Request, res: Response, next: NextFunction): void => {

@@ -219,7 +219,7 @@ export const syncCalendar = async (req: AuthRequest, res: Response): Promise<voi
     // Get emails
     const emailsRes = await pool.query(
       `SELECT s.email FROM students s
-       JOIN class_members cm ON s.id = cm.student_id
+       JOIN enrollments cm ON s.id = cm.student_id
        WHERE cm.class_id = $1 AND cm.status = 'ACTIVE' AND s.is_active = true AND s.email IS NOT NULL`,
       [session.class_id]
     );

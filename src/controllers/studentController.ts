@@ -52,19 +52,20 @@ export const getStudents = async (req: AuthRequest, res: Response): Promise<void
 
 // THÊM HỌC SINH MỚI
 export const createStudent = async (req: AuthRequest, res: Response): Promise<void> => {
-  let { student_code, full_name, phone, parent_phone, school, grade, current_level, phone_number } = req.body;
+  let { student_code, full_name, phone, phone_number, parent_phone, school, school_name, grade, current_level, email, password } = req.body;
   const user = req.user;
 
   if (!student_code) {
     student_code = 'HS' + Date.now().toString().slice(-6);
   }
   const phoneToUse = phone || phone_number || '';
+  const schoolToUse = school || school_name || '';
 
   try {
     const result = await pool.query(
-      `INSERT INTO students (student_code, full_name, phone_number, parent_phone, school, grade, current_level) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [student_code, full_name, phoneToUse, parent_phone, school, grade, current_level]
+      `INSERT INTO students (student_code, full_name, phone_number, parent_phone, school_name, school, grade, current_level, email) 
+       VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8) RETURNING *`,
+      [student_code, full_name, phoneToUse, parent_phone, schoolToUse, grade, current_level, email || null]
     );
 
     const student = result.rows[0];
@@ -72,15 +73,16 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
     // Tạo tài khoản đăng nhập cho học sinh (Role = 'STUDENT')
     try {
       const username = phoneToUse || student_code;
-      const email = `${username.toLowerCase()}@student.local`; // Cần cho DB schema cũ nếu email NOT NULL
-      const passwordHash = await bcrypt.hash('123456', 10);
+      const userEmail = email || `${username.toLowerCase()}@student.local`; // Cần cho DB schema cũ nếu email NOT NULL
+      const bcrypt = require('bcrypt');
+      const passwordHash = await bcrypt.hash(password || '123456', 10);
       
       // Kiểm tra cột username trong users
       try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255) UNIQUE;`); } catch(e){}
 
       await pool.query(
         `INSERT INTO users (username, email, password_hash, role, full_name, student_id) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [username, email, passwordHash, 'STUDENT', full_name, student.id]
+        [username, userEmail, passwordHash, 'STUDENT', full_name, student.id]
       );
     } catch (e) {
       console.log('Không thể tạo user tự động cho học sinh:', e);
@@ -94,7 +96,8 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
     // Fallback cho schema cũ nếu initCore.sql chưa được chạy hoàn chỉnh
     try {
       const username = phoneToUse || student_code;
-      const hashedPassword = await bcrypt.hash('123456', 10);
+      const bcrypt = require('bcrypt');
+      const hashedPassword = await bcrypt.hash(password || '123456', 10);
       const fallback = await pool.query(
         `INSERT INTO students (full_name, phone_number, username, password, teacher_id) 
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
@@ -104,81 +107,60 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
         message: 'Thêm học sinh thành công (schema cũ)',
         student: fallback.rows[0]
       });
-    } catch(e) {
-      console.error(error, e);
-      res.status(500).json({ message: 'Lỗi server khi thêm học sinh' });
+    } catch (e) {
+      console.error(error);
+      res.status(500).json({ message: 'Lỗi máy chủ nội bộ' });
     }
   }
 };
 
-// HỒ SƠ 360°
-export const getProfile360 = async (req: Request, res: Response): Promise<void> => {
-  const { id } = req.params;
+
+export const getProfile360 = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    // 1. Thông tin cá nhân
-    const studentRes = await pool.query('SELECT id, full_name, phone_number AS phone, school_name AS school, is_active AS status, learning_goals, COALESCE(ai_evaluation, \'null\'::jsonb) AS ai_evaluation FROM students WHERE id = $1', [id]);
+    const { id } = req.params;
+    const studentRes = await pool.query('SELECT * FROM students WHERE id = $1', [id]);
     if (studentRes.rows.length === 0) {
-      res.status(404).json({ message: "Không tìm thấy học sinh" });
+      res.status(404).json({ message: 'Không tìm thấy học sinh' });
       return;
     }
     const student = studentRes.rows[0];
 
-    // 2. Danh sách lớp
-    const classesRes = await pool.query(
-      `SELECT c.*, e.enrollment_date as enroll_date, e.status as member_status 
-       FROM enrollments e 
-       JOIN classes c ON e.class_id = c.id 
-       WHERE e.student_id = $1`,
+    // Lấy lớp học (sửa class_members thành enrollments)
+    const classRes = await pool.query(
+      'SELECT c.class_name, c.schedule, c.meet_link FROM enrollments e JOIN classes c ON e.class_id = c.id WHERE e.student_id = $1 AND e.status = \'ACTIVE\'',
       [id]
     );
 
-    // 3. Thống kê chuyên cần
-    const attendanceRes = await pool.query(
-      `SELECT status, COUNT(*) as count 
-       FROM attendance 
-       WHERE student_id = $1 
-       GROUP BY status`,
+    const attendRes = await pool.query(
+      'SELECT status, count(*) FROM attendance WHERE student_id = $1 GROUP BY status',
       [id]
     );
 
-    let total_sessions = 0;
-    let present = 0;
-    let late = 0;
-    let absent = 0;
+    const scoresRes = await pool.query(
+      'SELECT document_id, total_score, submitted_at FROM exam_submissions WHERE student_id = $1 ORDER BY submitted_at DESC LIMIT 5',
+      [id]
+    );
 
-    attendanceRes.rows.forEach(row => {
-      const cnt = parseInt(row.count);
-      total_sessions += cnt;
-      if (row.status === 'PRESENT') present += cnt;
-      else if (row.status === 'LATE') late += cnt;
-      else if (row.status === 'ABSENT_EXCUSED' || row.status === 'ABSENT_UNEXCUSED') absent += cnt;
+    res.status(200).json({
+      student,
+      classes: classRes.rows,
+      attendance: attendRes.rows,
+      recent_scores: scoresRes.rows,
     });
-
-    res.json({
-      profile: student,
-      classes: classesRes.rows,
-      attendance: {
-        total: total_sessions,
-        present,
-        late,
-        absent,
-        rate: total_sessions > 0 ? Math.round(((present + late) / total_sessions) * 100) : 0
-      }
-    });
-
   } catch (error) {
-    console.error('Lỗi get profile360:', error);
-      res.status(500).json({ message: 'Lỗi server' });
+    res.status(500).json({ message: 'Lỗi server' });
   }
 };
 
 export const updateStudent = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params; 
-  const { full_name, phone, parent_phone, school, grade, current_level } = req.body; 
+  const { full_name, phone, phone_number, parent_phone, school, school_name, grade, current_level, email } = req.body; 
   try {
+    const phoneToUse = phone_number || phone;
+    const schoolToUse = school_name || school;
     const result = await pool.query(
-      'UPDATE students SET full_name = $1, phone_number = $2, parent_phone = $3, school = $4, grade = $5, current_level = $6 WHERE id = $7 RETURNING *',
-      [full_name, phone, parent_phone, school, grade, current_level, id]
+      'UPDATE students SET full_name = $1, phone_number = $2, parent_phone = $3, school_name = $4, school = $4, grade = $5, current_level = $6, email = $7 WHERE id = $8 RETURNING *',
+      [full_name, phoneToUse, parent_phone, schoolToUse, grade, current_level, email || null, id]
     );
     res.status(200).json(result.rows[0]);
   } catch (error) {

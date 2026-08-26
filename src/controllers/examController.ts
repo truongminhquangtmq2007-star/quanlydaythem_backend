@@ -694,26 +694,60 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
             return;
         }
 
-        console.log('--- ĐANG GỬI FILE CHO GEMINI AI XỬ LÝ ---');
-
-        // 1. Gửi file cho Gemini xử lý
-        const fullExam = await parseFullExamFromFileWithGemini(file);
-
-        // 2. Trích xuất đáp án đúng của từng phần
-        const part1Key = fullExam.part1.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
-        const part2Key = fullExam.part2.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
-        const part3Key = fullExam.part3.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
-
-        console.log('--- XỬ LÝ FILE HOÀN TẤT ---');
-
-        // Ghi lưu Document vào thư viện
+        // 1. LUÔN LUÔN tạo document TRƯỚC
         let actual_document_id = document_id;
+        let folderId = null;
         if (!actual_document_id) {
+            // Find EXAM folder for this class_id
+            if (class_id) {
+                const folderCheck = await pool.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
+                if (folderCheck.rows.length > 0) {
+                    folderId = folderCheck.rows[0].id;
+                } else {
+                    const newFolder = await pool.query(
+                        "INSERT INTO folders (name, category, class_id) VALUES ('Đề thi', 'EXAM', $1) RETURNING id",
+                        [class_id]
+                    );
+                    folderId = newFolder.rows[0].id;
+                }
+            }
+            
             const docRes = await pool.query(
-                `INSERT INTO documents (document_code, title, file_url, category, type) VALUES ($1, $2, $3, 'EXAM', 'EXAM') RETURNING id`,
-                [`EXAM${Date.now().toString().slice(-6)}`, file.originalname || 'Đề thi tự động tạo', file.path]
+                `INSERT INTO documents (title, file_url, category, folder_id) VALUES ($1, $2, 'EXAM', $3) RETURNING id`,
+                [file.originalname || 'Đề thi tự động tạo', file.path, folderId]
             );
             actual_document_id = docRes.rows[0].id;
+        }
+
+        console.log('--- ĐANG GỌI FILE CHO GEMINI AI XỬ LÝ ---');
+        
+        let fullExam = null;
+        let part1Key = {};
+        let part2Key = {};
+        let part3Key = {};
+
+        // 2. Gọi AI trong try-catch
+        try {
+            fullExam = await parseFullExamFromFileWithGemini(file);
+            part1Key = fullExam.part1.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+            part2Key = fullExam.part2.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+            part3Key = fullExam.part3.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+            console.log('--- XỬ LÝ FILE HOÀN TẤT ---');
+        } catch (aiError: any) {
+            console.error('Lỗi Gemini AI timeout hoặc 429:', aiError);
+            res.status(200).json({ 
+                message: 'Lưu đề thi thành công! (Lưu ý: AI bóc tách thất bại do quá tải, vui lòng nhập câu hỏi thủ công)',
+                examKey: {
+                    part1_key: {},
+                    part2_key: {},
+                    part3_key: {},
+                    document_id: actual_document_id,
+                    class_id: class_id,
+                    duration_minutes: durationMinutes || 50
+                },
+                examContent: { part1: [], part2: [], part3: [] }
+            });
+            return;
         }
 
         res.status(200).json({ 
@@ -730,7 +764,7 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
         });
     } catch (error: any) {
         console.error('Lỗi nhận và xử lý file:', error);
-        res.status(500).json({ message: 'Lỗi server khi AI xử lý file', detail: error.message });
+        res.status(500).json({ message: 'Lỗi server khi xử lý file', detail: error.message });
     }
 };
 
