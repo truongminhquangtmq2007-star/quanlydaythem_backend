@@ -13,6 +13,7 @@ import {
   getSessionAttendance,
   getClass
 } from '../controllers/classController';
+import { getAssignableDocuments, assignDocumentsToClass } from '../controllers/classDocumentController';
 import { getClassAssignments } from '../controllers/assignmentController';
 import { verifyToken, isAdmin } from '../middleware/authMiddleware';
 
@@ -39,5 +40,9 @@ router.get('/:id/assignments', verifyToken, getClassAssignments);
 
 router.get('/sessions/:id/attendance', verifyToken, getSessionAttendance);
 router.put('/sessions/:id/attendance', verifyToken, updateAttendance);
+
+
+router.get('/:id/assignable-documents', verifyToken, getAssignableDocuments);
+router.post('/:id/assign-documents', verifyToken, assignDocumentsToClass);
 
 export default router;
