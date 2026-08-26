@@ -104,3 +104,4 @@ if (oldParseFunctionRegex.test(code)) {
 
 fs.writeFileSync('src/controllers/examController.ts', code);
 console.log("Patched parseExamFromFile in examController.ts");
+

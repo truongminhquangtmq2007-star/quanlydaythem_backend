@@ -85,3 +85,4 @@ code = code.replace(/export const updateStudent = async \(req: AuthRequest, res:
 
 fs.writeFileSync('src/controllers/studentController.ts', code);
 console.log("Patched studentController.ts completely");
+

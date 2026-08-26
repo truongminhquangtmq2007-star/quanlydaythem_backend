@@ -99,3 +99,4 @@ code = part1 + newCreateStudent + (profileStr ? profileStr + "\n\n" : "") + newU
 
 fs.writeFileSync('src/controllers/studentController.ts', code);
 console.log("Patched studentController.ts heavily");
+

@@ -6,3 +6,4 @@ code = code.replace("const regex = /(Câu\\s+\\d+[:\\.])/gi;", "const regex = /(
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log("Patched regex in geminiService");
+

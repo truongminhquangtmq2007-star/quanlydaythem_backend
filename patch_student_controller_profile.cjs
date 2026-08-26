@@ -43,3 +43,4 @@ export const getProfile360 = async (req: AuthRequest, res: Response): Promise<vo
 code = code.replace("export const updateStudent", profile360Str + "\nexport const updateStudent");
 fs.writeFileSync('src/controllers/studentController.ts', code);
 console.log("Restored getProfile360");
+

@@ -22,3 +22,4 @@ for (const file of files) {
 }
 
 console.log(`Replaced \${replacedCount} occurrences of class_members with enrollments.`);
+

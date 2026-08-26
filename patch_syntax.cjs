@@ -35,3 +35,4 @@ const TAXONOMIES = {
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log("Patched syntax errors");
+

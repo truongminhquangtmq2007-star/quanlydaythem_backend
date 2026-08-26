@@ -12,8 +12,7 @@ const MODEL_FALLBACK_CHAIN = [
   'gemini-3.6-flash',
   'gemini-3.5-flash',
   'gemini-3.1-pro-preview',
-  'gemini-2.5-flash',
-  'gemini-1.5-flash'
+  'gemini-2.5-flash'
 ];
 
 const ai = new GoogleGenAI({
