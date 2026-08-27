@@ -756,18 +756,12 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
                 ...(fullExam.part3 || []).map((q: any) => ({ ...q, part_number: 3, question_type: 'SHORT_ANSWER' }))
             ];
 
-            for (const q of allQuestions) {
-                await pool.query(
+            await Promise.all(allQuestions.map(q => 
+                pool.query(
                     `INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) VALUES ($1, $2, $3, $4, $5)`,
-                    [
-                        actual_document_id,
-                        q.part_number,
-                        q.question_type,
-                        JSON.stringify(q),
-                        JSON.stringify(q.correctAnswer || q.correct_answer || null)
-                    ]
-                );
-            }
+                    [actual_document_id, q.part_number, q.question_type, JSON.stringify(q), JSON.stringify(q.correctAnswer)]
+                )
+            ));
         } catch (error: any) {
             res.status(500).json({ message: "Lỗi lưu cơ sở dữ liệu: " + error.message });
             return;
