@@ -72,3 +72,4 @@ if (tryAIEndIndex !== -1 && parseExamEndIndex !== -1) {
 } else {
     console.log("Could not find blocks");
 }
+
