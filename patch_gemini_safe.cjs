@@ -40,3 +40,4 @@ code = code.replace(parseRegex, newFunc);
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log("Patched safely");
+

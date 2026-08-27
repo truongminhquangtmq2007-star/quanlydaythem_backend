@@ -63,3 +63,4 @@ if (parseFileStartIndex !== -1) {
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log("Patched correctly");
+

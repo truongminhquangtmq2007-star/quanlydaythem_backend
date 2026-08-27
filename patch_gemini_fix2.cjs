@@ -41,3 +41,4 @@ if (idx3 !== -1 && idx4 !== -1 && idx3 < idx4) {
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log("Patched geminiService.ts successfully.");
+

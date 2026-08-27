@@ -47,3 +47,4 @@ if (startIndex !== -1 && endIndex !== -1 && startIndex < endIndex) {
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log("Patched geminiService.ts with precision.");
+

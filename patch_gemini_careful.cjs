@@ -43,3 +43,4 @@ code = code.replace(oldFunctionRegex, newFunction);
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log("Patched geminiService.ts carefully.");
+

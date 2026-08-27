@@ -38,3 +38,4 @@ code = code.replace(oldFunction, newFunction);
 
 fs.writeFileSync('src/services/geminiService.ts', code);
 console.log("Patched geminiService.ts successfully.");
+

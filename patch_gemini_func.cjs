@@ -40,3 +40,4 @@ if (parseFileStartIndex !== -1) {
 } else {
     console.log("Could not find parseFileStartStr");
 }
+
