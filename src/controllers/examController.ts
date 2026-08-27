@@ -733,32 +733,57 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
         } catch (aiError: any) {
             console.error('Lỗi Gemini AI timeout hoặc 429:', aiError);
             res.status(200).json({ 
+                status: 'success',
                 message: 'Lưu đề thi thành công! (Lưu ý: AI bóc tách thất bại do quá tải, vui lòng nhập câu hỏi thủ công)',
-                examKey: {
-                    part1_key: {},
-                    part2_key: {},
-                    part3_key: {},
+                data: {
                     document_id: actual_document_id,
                     class_id: class_id,
-                    duration_minutes: durationMinutes || 50
-                },
-                examContent: { part1: [], part2: [], part3: [] }
+                    duration_minutes: durationMinutes || 50,
+                    examKey: { part1_key: {}, part2_key: {}, part3_key: {} },
+                    examContent: { part1: [], part2: [], part3: [], shared_context: [] },
+                    questions: [],
+                    shared_context: []
+                }
             });
             return;
         }
 
-        res.status(200).json({ 
-            message: 'Phân tích file bằng AI thành công! Vui lòng kiểm tra và chỉnh sửa trước khi lưu.',
-            examKey: {
-                part1_key: part1Key,
-                part2_key: part2Key,
-                part3_key: part3Key,
-                document_id: actual_document_id,
-                class_id: class_id,
-                duration_minutes: durationMinutes || 50
-            },
-            examContent: fullExam
-        });
+        // LƯU VÀO questions ĐỂ KHÔNG BỊ LỖI
+        try {
+            const allQuestions = [
+                ...(fullExam.part1 || []).map((q: any) => ({ ...q, part_number: 1, question_type: 'MULTIPLE_CHOICE' })),
+                ...(fullExam.part2 || []).map((q: any) => ({ ...q, part_number: 2, question_type: 'TRUE_FALSE' })),
+                ...(fullExam.part3 || []).map((q: any) => ({ ...q, part_number: 3, question_type: 'SHORT_ANSWER' }))
+            ];
+
+            for (const q of allQuestions) {
+                await pool.query(
+                    `INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) VALUES ($1, $2, $3, $4, $5)`,
+                    [
+                        actual_document_id,
+                        q.part_number,
+                        q.question_type,
+                        JSON.stringify(q),
+                        JSON.stringify(q.correctAnswer || q.correct_answer || null)
+                    ]
+                );
+            }
+        } catch (error: any) {
+            res.status(500).json({ message: "Lỗi lưu cơ sở dữ liệu: " + error.message });
+            return;
+        }
+
+        const resultData = {
+            document_id: actual_document_id,
+            class_id: class_id,
+            duration_minutes: durationMinutes || 50,
+            examKey: { part1_key: part1Key, part2_key: part2Key, part3_key: part3Key },
+            examContent: fullExam,
+            questions: fullExam,
+            shared_context: fullExam?.shared_context || []
+        };
+
+        res.status(200).json({ status: 'success', data: resultData });
     } catch (error: any) {
         console.error('Lỗi nhận và xử lý file:', error);
         res.status(500).json({ message: 'Lỗi server khi xử lý file', detail: error.message });
