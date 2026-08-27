@@ -165,7 +165,7 @@ export const getDraftExam = async (req: AuthRequest, res: Response): Promise<voi
         const examId = req.params.id;
         const result = await pool.query(
             `SELECT student_answers, last_saved_at, time_taken_seconds FROM exam_submissions 
-             WHERE student_id = $1 AND (document_id = $2 OR exam_id = $2) AND status = 'IN_PROGRESS'`,
+             WHERE student_id = $1 AND document_id = $2 AND status = 'IN_PROGRESS'`,
             [studentId, examId]
         );
 
@@ -186,7 +186,7 @@ export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<vo
         const examId = req.params.id;
         const { answers, time_taken_seconds } = req.body;
         const exist = await pool.query(
-            `SELECT id FROM exam_submissions WHERE student_id = $1 AND (document_id = $2 OR exam_id = $2) AND status = 'IN_PROGRESS'`,
+            `SELECT id FROM exam_submissions WHERE student_id = $1 AND document_id = $2 AND status = 'IN_PROGRESS'`,
             [studentId, examId]
         );
 
@@ -197,8 +197,7 @@ export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<vo
             );
         } else {
             await pool.query(
-                `INSERT INTO exam_submissions (document_id, exam_id, student_id, student_answers, time_taken_seconds, status, last_saved_at) 
-                 VALUES ($1, $1, $2, $3, $4, 'IN_PROGRESS', NOW())`,
+                `INSERT INTO exam_submissions (document_id, student_id, student_answers, time_taken_seconds, status, last_saved_at) VALUES ($1, $2, $3, $4, 'IN_PROGRESS', NOW())`,
                 [examId, studentId, JSON.stringify(answers), time_taken_seconds || 0]
             );
         }
@@ -436,7 +435,7 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
 
         // Lưu kết quả nộp bài vào bảng exam_submissions
         const existDraft = await pool.query(
-            `SELECT id FROM exam_submissions WHERE student_id = $1 AND (document_id = $2 OR exam_id = $2) AND status = 'IN_PROGRESS'`,
+            `SELECT id FROM exam_submissions WHERE student_id = $1 AND document_id = $2 AND status = 'IN_PROGRESS'`,
             [studentId, examId]
         );
 
@@ -451,10 +450,8 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
             );
         } else {
             submitResult = await pool.query(
-                `INSERT INTO exam_submissions 
-                (document_id, exam_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, answers, status) 
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'COMPLETED') RETURNING *`,
-                [examId, examId, studentId, normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details)]
+                `INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, answers, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED') RETURNING *`,
+                [examId, studentId, normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details)]
             );
         }
 
@@ -831,7 +828,7 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
 
         // Lấy thông tin bài thi của học sinh
         const submissionRes = await pool.query(
-            "SELECT student_answers, answers AS detailed_results FROM exam_submissions WHERE student_id = $1 AND (document_id = $2 OR exam_id = $2) AND status = 'COMPLETED'",
+            "SELECT student_answers, answers AS detailed_results FROM exam_submissions WHERE student_id = $1 AND document_id = $2 AND status = 'COMPLETED'",
             [studentId, exam_id]
         );
 
