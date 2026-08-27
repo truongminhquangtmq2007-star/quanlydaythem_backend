@@ -49,3 +49,4 @@ if (code.includes('Phân tích file bằng AI thành công!')) {
 
 fs.writeFileSync('src/controllers/examController.ts', code);
 console.log("Patched examController.ts");
+

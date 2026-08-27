@@ -47,3 +47,4 @@ if (parseExamStart !== -1 && parseExamEnd !== -1) {
 } else {
     console.log("Could not find parseExamFromFile");
 }
+

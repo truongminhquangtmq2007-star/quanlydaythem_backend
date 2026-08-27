@@ -42,3 +42,4 @@ code = code.replace(
 
 fs.writeFileSync('src/controllers/examController.ts', code);
 console.log("Patched DB columns");
+

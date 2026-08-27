@@ -88,3 +88,4 @@ code = code.replace(flexibleRegex(oldSuccRes), newSuccRes);
 
 fs.writeFileSync('src/controllers/examController.ts', code);
 console.log("Patched safely using exact flexible whitespace string matching");
+
