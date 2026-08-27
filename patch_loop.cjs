@@ -17,3 +17,4 @@ if (code.match(oldLoop)) {
 } else {
     console.log("Failed to match regex for loop patch");
 }
+

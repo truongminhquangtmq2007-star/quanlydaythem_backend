@@ -25,3 +25,4 @@ if (startIndex !== -1) {
         console.log("Replaced loop with Promise.all");
     }
 }
+
