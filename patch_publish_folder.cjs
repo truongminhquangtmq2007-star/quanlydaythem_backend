@@ -18,3 +18,4 @@ if (code.match(regex)) {
     // Note: the regex matches multiple occurrences. We only want to replace the one in publishExam.
     // Let's use string replace but carefully.
 }
+
