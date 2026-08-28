@@ -31,3 +31,4 @@ newCode = newCode.replace(
 
 fs.writeFileSync('src/controllers/examController.ts', newCode);
 console.log("Patched documents query in examController.ts");
+
