@@ -715,16 +715,20 @@ const publishExam = async (req, res) => {
             if (folderCheck.rows.length > 0) {
                 folderId = folderCheck.rows[0].id;
             }
+            else {
+                const newFolder = await db_1.default.query("INSERT INTO folders (name, category, class_id, teacher_id) VALUES ('Đề thi', 'EXAM', $1, $2) RETURNING id", [class_id, req.user?.id || null]);
+                folderId = newFolder.rows[0].id;
+            }
         }
         // 1. Tạo hoặc cập nhật Document
         let actual_document_id = document_id;
         if (!document_id || document_id === 0) {
-            const docRes = await db_1.default.query(`INSERT INTO documents (title, category, folder_id, duration_minutes, teacher_id) 
-                 VALUES ($1, 'EXAM', $2, $3, $4) RETURNING id`, [title || 'Đề thi AI', folderId, duration_minutes, req.user?.id || null]);
+            const docRes = await db_1.default.query(`INSERT INTO documents (title, category, folder_id, teacher_id) 
+                 VALUES ($1, 'EXAM', $2, $3) RETURNING id`, [title || 'Đề thi AI', folderId, req.user?.id || null]);
             actual_document_id = docRes.rows[0].id;
         }
         else {
-            await db_1.default.query(`UPDATE documents SET title = $1, folder_id = $2, duration_minutes = $3 WHERE id = $4`, [title, folderId, duration_minutes, actual_document_id]);
+            await db_1.default.query(`UPDATE documents SET title = $1, folder_id = $2 WHERE id = $3`, [title, folderId, actual_document_id]);
         }
         if (exam_content) {
             // 2. Lưu vào bảng exam_keys (để hiện thị lại khi vào xem)

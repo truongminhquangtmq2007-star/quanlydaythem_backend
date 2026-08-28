@@ -824,6 +824,12 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
             const folderCheck = await pool.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
             if (folderCheck.rows.length > 0) {
                 folderId = folderCheck.rows[0].id;
+            } else {
+                const newFolder = await pool.query(
+                    "INSERT INTO folders (name, category, class_id, teacher_id) VALUES ('Đề thi', 'EXAM', $1, $2) RETURNING id",
+                    [class_id, req.user?.id || null]
+                );
+                folderId = newFolder.rows[0].id;
             }
         }
 
