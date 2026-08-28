@@ -831,15 +831,15 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
         let actual_document_id = document_id;
         if (!document_id || document_id === 0) {
             const docRes = await pool.query(
-                `INSERT INTO documents (title, category, folder_id, duration_minutes, teacher_id) 
-                 VALUES ($1, 'EXAM', $2, $3, $4) RETURNING id`,
-                [title || 'Đề thi AI', folderId, duration_minutes, req.user?.id || null]
+                `INSERT INTO documents (title, category, folder_id, teacher_id) 
+                 VALUES ($1, 'EXAM', $2, $3) RETURNING id`,
+                [title || 'Đề thi AI', folderId, req.user?.id || null]
             );
             actual_document_id = docRes.rows[0].id;
         } else {
             await pool.query(
-                `UPDATE documents SET title = $1, folder_id = $2, duration_minutes = $3 WHERE id = $4`,
-                [title, folderId, duration_minutes, actual_document_id]
+                `UPDATE documents SET title = $1, folder_id = $2 WHERE id = $3`,
+                [title, folderId, actual_document_id]
             );
         }
 
