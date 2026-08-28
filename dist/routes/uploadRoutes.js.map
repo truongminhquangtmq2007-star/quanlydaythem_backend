@@ -1,0 +1,1 @@
+{"version":3,"file":"uploadRoutes.js","sourceRoot":"","sources":["../../src/routes/uploadRoutes.ts"],"names":[],"mappings":";;AAAA,qCAAiC;AACjC,iEAA6E;AAC7E,sEAA8E;AAE9E,MAAM,MAAM,GAAG,IAAA,gBAAM,GAAE,CAAC;AAExB,MAAM,CAAC,IAAI,CAAC,QAAQ,EAAE,4BAAW,EAAE,iCAAgB,EAAE,8BAAW,CAAC,CAAC;AAClE,MAAM,CAAC,IAAI,CAAC,WAAW,EAAE,4BAAW,EAAE,iCAAgB,EAAE,iCAAc,CAAC,CAAC;kBAEzD,MAAM"}
