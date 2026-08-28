@@ -22,3 +22,4 @@ if (code.match(regex)) {
     // Print a bit of the file for debug
     console.log(code.substring(code.indexOf("publishExam"), code.indexOf("publishExam") + 500));
 }
+
