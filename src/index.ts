@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
-import cors from 'cors'; // Giữ lại 1 dòng import CORS duy nhất
+import cors from 'cors';
 import dotenv from 'dotenv';
 import './db'; 
 import fs from 'fs';
@@ -48,7 +48,6 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/folders', folderRoutes);
 app.use('/api/sessions', sessionRoutes);
-app.use('/api/bills', paymentRoutes); 
 app.use('/api/exams', examRoutes);
 app.use('/api/assignments', assignmentRoutes);
 app.use('/api/analytics', analyticsRoutes);

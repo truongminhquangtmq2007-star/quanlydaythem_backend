@@ -137,11 +137,6 @@ export const getAllDocuments = async (req: Request, res: Response): Promise<void
   }
 };
 
-export const uploadDocument = async (req: Request, res: Response): Promise<void> => {
-  // Legacy method fallback
-  res.status(200).json({ message: 'Legacy upload method' });
-};
-
 export const getDrive = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { category, class_id } = req.query;
