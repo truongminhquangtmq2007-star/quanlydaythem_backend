@@ -25,11 +25,18 @@ exports.createAssignment = createAssignment;
 // GET /api/classes/:id/assignments
 const getClassAssignments = async (req, res) => {
     try {
-        // Ẩn tính năng Bài tập do lỗi schema, luôn trả về mảng rỗng
-        res.status(200).json([]);
+        const { id } = req.params;
+        const result = await db_1.default.query(`SELECT a.*, d.category, f.name as folder_name 
+       FROM assignments a
+       LEFT JOIN documents d ON a.document_id = d.id
+       LEFT JOIN folders f ON d.folder_id = f.id
+       WHERE a.class_id = $1
+       ORDER BY a.created_at DESC`, [id]);
+        res.status(200).json(result.rows);
     }
     catch (error) {
-        res.status(500).json({ message: "Lỗi máy chủ nội bộ" });
+        console.error('Error fetching assignments:', error);
+        res.status(500).json({ message: "Lỗi server khi tải danh sách bài tập" });
     }
 };
 exports.getClassAssignments = getClassAssignments;

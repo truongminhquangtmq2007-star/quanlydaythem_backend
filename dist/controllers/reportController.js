@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getWeeklyReport = void 0;
 const db_1 = __importDefault(require("../db"));
-const aiService_1 = require("../services/ai/aiService");
+const geminiService_1 = require("../services/geminiService");
 const getWeeklyReport = async (req, res) => {
     try {
         const { id } = req.params;
@@ -72,7 +72,7 @@ Yêu cầu:
 3. Chỉ ra sự tiến bộ và đưa ra 1-2 chiến thuật cụ thể để cải thiện điểm yếu.
 4. Ngắn gọn trong vòng 150 - 250 từ. Trình bày bằng Markdown chuyên nghiệp, có highlight bôi đậm.`;
         // Gọi AI
-        const aiReport = await (0, aiService_1.explainErrorWithAI)(prompt);
+        const aiReport = await (0, geminiService_1.explainErrorWithAI)(prompt);
         res.status(200).json({
             student,
             stats: {

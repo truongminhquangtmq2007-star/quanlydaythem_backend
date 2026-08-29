@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { explainErrorWithAI as generateAIResponse } from '../services/ai/aiService';
+import { explainErrorWithAI as generateAIResponse } from '../services/geminiService';
 
 export const getWeeklyReport = async (req: AuthRequest, res: Response): Promise<void> => {
     try {

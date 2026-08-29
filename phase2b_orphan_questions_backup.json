@@ -1,0 +1,246 @@
+[
+  {
+    "id": 475,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":6,\"questionText\":\"Khi đúc một vật bằng đồng, quá trình đồng chuyển từ thể lỏng thành thể rắn là quá trình\",\"options\":{\"A\":\"ngưng tụ.\",\"B\":\"đông đặc.\",\"C\":\"hoá hơi.\",\"D\":\"nóng chảy.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 477,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":18,\"questionText\":\"Trong nguyên tử lithium, có bao nhiêu electron chuyển động xung quanh hạt nhân $_3^7\\\\text{Li}$?\",\"options\":{\"A\":\"7.\",\"B\":\"3.\",\"C\":\"4.\",\"D\":\"1.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Vật Lý Lượng Tử\",\"sub_topic\":\"Vật Lý Lượng Tử\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 481,
+    "quiz_id": 0,
+    "part_number": 2,
+    "question_type": "TRUE_FALSE",
+    "content": "{\"id\":3,\"questionText\":\"Sóng điện từ được ứng dụng nhiều trong thông tin liên lạc.\",\"statements\":{\"a\":\"Sóng điện từ là sóng dọc.\",\"b\":\"Tại một điểm có sóng điện từ truyền qua, cường độ điện trường và cảm ứng từ luôn dao động cùng pha.\",\"c\":\"Không thể tạo ra hiện tượng giao thoa đối với sóng điện từ.\",\"d\":\"Giả sử tại một điểm có sóng điện từ truyền qua theo phương thẳng đứng hướng lên trên, nếu cảm ứng từ có hướng bắc nam thì cường độ điện trường có hướng đông tây.\"},\"correctAnswer\":{\"a\":\"S\",\"b\":\"Đ\",\"c\":\"S\",\"d\":\"Đ\"},\"main_topic\":\"Điện Từ Học\",\"sub_topic\":\"Điện Từ Học\",\"part_number\":2,\"question_type\":\"TRUE_FALSE\"}",
+    "answer_data": {
+      "a": "S",
+      "b": "Đ",
+      "c": "S",
+      "d": "Đ"
+    }
+  },
+  {
+    "id": 484,
+    "quiz_id": 0,
+    "part_number": 3,
+    "question_type": "SHORT_ANSWER",
+    "content": "{\"id\":1,\"questionText\":\"Độ lớn suất điện động cảm ứng trong khung dây là $x \\\\cdot 10^{-3}\\\\text{ V}$. Tìm $x$ (làm tròn kết quả đến chữ số hàng phần trăm).\",\"correctAnswer\":\"3.25\",\"main_topic\":\"Điện Từ Học\",\"sub_topic\":\"Điện Từ Học\",\"part_number\":3,\"question_type\":\"SHORT_ANSWER\"}",
+    "answer_data": "3.25"
+  },
+  {
+    "id": 489,
+    "quiz_id": 0,
+    "part_number": 3,
+    "question_type": "SHORT_ANSWER",
+    "content": "{\"id\":3,\"questionText\":\"Bình chứa khí $\\\\text{CH}_4$ có thể tích $135\\\\text{ lít}$ và được duy trì ở nhiệt độ $-43^\\\\circ\\\\text{C}$. Áp suất của khí $\\\\text{CH}_4$ trong bình là $x \\\\cdot 10^5\\\\text{ Pa}$. Tìm $x$ (làm tròn kết quả đến chữ số hàng phần trăm).\",\"correctAnswer\":\"1.48\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":3,\"question_type\":\"SHORT_ANSWER\"}",
+    "answer_data": "1.48"
+  },
+  {
+    "id": 473,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":4,\"questionText\":\"Theo mô hình động học phân tử, giữa các phân tử\",\"options\":{\"A\":\"không có lực tương tác.\",\"B\":\"có lực tương tác luôn là lực hút.\",\"C\":\"có lực tương tác luôn là lực đẩy.\",\"D\":\"có lực tương tác bao gồm lực hút và lực đẩy.\"},\"correctAnswer\":\"D\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "D"
+  },
+  {
+    "id": 474,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":2,\"questionText\":\"Trong thí nghiệm tán xạ hạt alpha của Rutherford, khi gặp lá vàng mỏng, hầu hết các hạt alpha\",\"options\":{\"A\":\"dừng lại.\",\"B\":\"chuyển động theo đường xoắn ốc.\",\"C\":\"bị bật ngược lại.\",\"D\":\"đi qua lá vàng.\"},\"correctAnswer\":\"D\",\"main_topic\":\"Vật Lý Lượng Tử\",\"sub_topic\":\"Vật Lý Lượng Tử\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "D"
+  },
+  {
+    "id": 479,
+    "quiz_id": 0,
+    "part_number": 2,
+    "question_type": "TRUE_FALSE",
+    "content": "{\"id\":1,\"questionText\":\"Một nhóm học sinh thảo luận phương án thí nghiệm làm giảm ảnh hưởng của sự trao đổi nhiệt với môi trường khi đo nhiệt nóng chảy riêng của nước đá. Họ dùng các dụng cụ: Phễu chứa nước đá (1), dây điện trở (2), cốc (3), cân điện tử (4) như hình bên.\\nNhóm học sinh cho rằng: Trong thời gian cấp điện cho dây điện trở, nếu xác định được càng chính xác khối lượng nước đá tan chảy vào cốc do nhiệt lượng nhận từ môi trường thì sẽ giảm được càng nhiều ảnh hưởng của sự trao đổi nhiệt giữa nước đá với môi trường.\\nPhương án thí nghiệm của họ gồm hai giai đoạn và được tóm tắt như sau:\\nGiai đoạn 1. Chưa cấp điện cho dây điện trở: Xác định khối lượng $m_1$ của nước đá tan và đã chảy từ phễu vào cốc trong khoảng thời gian $t_1$.\\nGiai đoạn 2. Cấp điện cho dây điện trở: Xác định khối lượng $m_2$ của nước đá tan và đã chảy từ phễu vào cốc trong khoảng thời gian $t_2$.\\nỞ cả hai giai đoạn, coi rằng khối lượng nước đá tan và đã chảy vào cốc do nhiệt lượng nhận từ môi trường trong những khoảng thời gian bằng nhau là như nhau và bỏ qua các ảnh hưởng khác (bay hơi, ngưng tụ của nước ...).\",\"statements\":{\"a\":\"Ở giai đoạn 1, nước đá tan do nhận nhiệt lượng từ môi trường.\",\"b\":\"Ở giai đoạn 2, nước đá tan do nhận nhiệt lượng từ dây điện trở và từ môi trường.\",\"c\":\"Nếu $t_2 = t_1$ thì có thể coi khối lượng của nước đá tan do nhận nhiệt lượng từ dây điện trở là $m = m_2 - m_1$.\",\"d\":\"Phương án thí nghiệm này là một trong những phương án có thể làm giảm được ảnh hưởng của sự trao đổi nhiệt với môi trường đến kết quả thí nghiệm.\"},\"correctAnswer\":{\"a\":\"Đ\",\"b\":\"Đ\",\"c\":\"Đ\",\"d\":\"Đ\"},\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":2,\"question_type\":\"TRUE_FALSE\"}",
+    "answer_data": {
+      "a": "Đ",
+      "b": "Đ",
+      "c": "Đ",
+      "d": "Đ"
+    }
+  },
+  {
+    "id": 480,
+    "quiz_id": 0,
+    "part_number": 2,
+    "question_type": "TRUE_FALSE",
+    "content": "{\"id\":4,\"questionText\":\"Các quá trình biến đổi hạt nhân là cơ sở của nhiều ứng dụng.\",\"statements\":{\"a\":\"Phản ứng phân hạch là phản ứng tỏa năng lượng.\",\"b\":\"Hạt nhân uranium $_{92}^{238}\\\\text{U}$ phóng xạ $\\\\alpha$ và biến đổi thành hạt nhân thorium $_{90}^{234}\\\\text{Th}$.\",\"c\":\"Phản ứng nhiệt hạch là phản ứng thu năng lượng.\",\"d\":\"Phóng xạ là quá trình tự phát và ngẫu nhiên.\"},\"correctAnswer\":{\"a\":\"Đ\",\"b\":\"Đ\",\"c\":\"S\",\"d\":\"Đ\"},\"main_topic\":\"Vật Lý Lượng Tử\",\"sub_topic\":\"Vật Lý Lượng Tử\",\"part_number\":2,\"question_type\":\"TRUE_FALSE\"}",
+    "answer_data": {
+      "a": "Đ",
+      "b": "Đ",
+      "c": "S",
+      "d": "Đ"
+    }
+  },
+  {
+    "id": 485,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":10,\"questionText\":\"Gọi $Q$ là nhiệt lượng cần thiết để làm một lượng chất có khối lượng $m$ chuyển hoàn toàn từ thể rắn sang thể lỏng ở nhiệt độ nóng chảy. Công thức xác định nhiệt nóng chảy riêng của chất này là\",\"options\":{\"A\":\"$\\\\frac{Q}{2m}$.\",\"B\":\"$\\\\frac{Q}{m}$.\",\"C\":\"$\\\\frac{m}{Q}$.\",\"D\":\"$\\\\frac{2Q}{m}$.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 486,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":7,\"questionText\":\"Công thức định luật 1 của nhiệt động lực học là $\\\\Delta U = A + Q$, với $Q$ là kí hiệu nhiệt lượng và $A$ là kí hiệu\",\"options\":{\"A\":\"nội năng.\",\"B\":\"công.\",\"C\":\"nhiệt dung riêng.\",\"D\":\"nhiệt độ.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 488,
+    "quiz_id": 0,
+    "part_number": 3,
+    "question_type": "SHORT_ANSWER",
+    "content": "{\"id\":4,\"questionText\":\"Khi một lượng khí $\\\\text{O}_2$ được rút ra để sử dụng thì áp suất khí trong bình chứa khí $\\\\text{O}_2$ bằng $54\\\\%$ áp suất khí khi chưa rút, nhiệt độ của bình khí không đổi. Khối lượng $\\\\text{O}_2$ đã được rút ra khỏi bình là bao nhiêu kilôgam (làm tròn kết quả đến chữ số hàng phần trăm)?\",\"correctAnswer\":\"0.15\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":3,\"question_type\":\"SHORT_ANSWER\"}",
+    "answer_data": "0.15"
+  },
+  {
+    "id": 490,
+    "quiz_id": 0,
+    "part_number": 3,
+    "question_type": "SHORT_ANSWER",
+    "content": "{\"id\":5,\"questionText\":\"Độ phóng xạ ban đầu của lượng $_{88}^{226}\\\\text{Ra}$ được sơn trên đồng hồ là bao nhiêu megabecơren (MBq, làm tròn kết quả đến chữ số hàng phần trăm)?\",\"correctAnswer\":\"0.31\",\"main_topic\":\"Vật Lý Lượng Tử\",\"sub_topic\":\"Vật Lý Lượng Tử\",\"part_number\":3,\"question_type\":\"SHORT_ANSWER\"}",
+    "answer_data": "0.31"
+  },
+  {
+    "id": 487,
+    "quiz_id": 0,
+    "part_number": 3,
+    "question_type": "SHORT_ANSWER",
+    "content": "{\"id\":2,\"questionText\":\"Biết điện trở của khung dây là $0,260\\\\ \\\\Omega$. Nhiệt lượng tỏa ra trên khung dây dẫn trong khoảng thời gian từ trường biến thiên là $x \\\\cdot 10^{-5}\\\\text{ J}$. Tìm $x$ (làm tròn kết quả đến chữ số hàng phần trăm).\",\"correctAnswer\":\"3.29\",\"main_topic\":\"Điện Từ Học\",\"sub_topic\":\"Điện Từ Học\",\"part_number\":3,\"question_type\":\"SHORT_ANSWER\"}",
+    "answer_data": "3.29"
+  },
+  {
+    "id": 491,
+    "quiz_id": 0,
+    "part_number": 3,
+    "question_type": "SHORT_ANSWER",
+    "content": "{\"id\":6,\"questionText\":\"Sau bao nhiêu năm thì độ phóng xạ của lượng $_{88}^{226}\\\\text{Ra}$ còn lại bằng $3,125\\\\%$ so với độ phóng xạ ban đầu (làm tròn kết quả đến chữ số hàng đơn vị)?\",\"correctAnswer\":\"8000\",\"main_topic\":\"Vật Lý Lượng Tử\",\"sub_topic\":\"Vật Lý Lượng Tử\",\"part_number\":3,\"question_type\":\"SHORT_ANSWER\"}",
+    "answer_data": "8000"
+  },
+  {
+    "id": 492,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":9,\"questionText\":\"Trong quá trình làm lạnh đẳng tích một khối khí lí tưởng xác định,\",\"options\":{\"A\":\"áp suất của khối khí tăng.\",\"B\":\"khối lượng riêng của khối khí tăng.\",\"C\":\"khối lượng riêng của khối khí giảm.\",\"D\":\"áp suất của khối khí giảm.\"},\"correctAnswer\":\"D\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "D"
+  },
+  {
+    "id": 465,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":1,\"questionText\":\"Trong quá trình đẳng nhiệt của một khối khí lí tưởng xác định,\",\"options\":{\"A\":\"áp suất của khối khí không đổi.\",\"B\":\"áp suất của khối khí tăng khi thể tích của khối khí giảm.\",\"C\":\"áp suất của khối khí tăng khi thể tích của khối khí tăng.\",\"D\":\"thể tích của khối khí không đổi.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 466,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":11,\"questionText\":\"Theo mô hình động học phân tử, ở thể khí, các phân tử\",\"options\":{\"A\":\"chuyển động hỗn loạn.\",\"B\":\"dao động quanh vị trí cân bằng không cố định.\",\"C\":\"chỉ dao động quanh vị trí cân bằng cố định.\",\"D\":\"sắp xếp có trật tự.\"},\"correctAnswer\":\"A\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "A"
+  },
+  {
+    "id": 467,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":12,\"questionText\":\"Một đoạn dây dẫn thẳng có chiều dài $\\\\ell$ mang dòng điện có cường độ $I$ được đặt trong từ trường đều với góc hợp bởi chiều dòng điện và chiều cảm ứng từ của từ trường là $\\\\alpha$. Lực từ do từ trường này tác dụng lên đoạn dây có độ lớn là $F$. Độ lớn cảm ứng từ $B$ của từ trường là\",\"options\":{\"A\":\"$B = \\\\frac{F}{I \\\\ell \\\\cot \\\\alpha}$.\",\"B\":\"$B = \\\\frac{F}{I \\\\ell \\\\sin \\\\alpha}$.\",\"C\":\"$B = \\\\frac{F}{I \\\\ell \\\\tan \\\\alpha}$.\",\"D\":\"$B = \\\\frac{F}{I \\\\ell \\\\cos \\\\alpha}$.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Điện Từ Học\",\"sub_topic\":\"Điện Từ Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 468,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":13,\"questionText\":\"Khi hai vật được đặt tiếp xúc với nhau, năng lượng nhiệt chỉ truyền từ vật này sang vật kia nếu chúng có\",\"options\":{\"A\":\"thế năng khác nhau.\",\"B\":\"khối lượng khác nhau.\",\"C\":\"thể tích khác nhau.\",\"D\":\"nhiệt độ khác nhau.\"},\"correctAnswer\":\"D\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "D"
+  },
+  {
+    "id": 469,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":14,\"questionText\":\"Độ lớn suất điện động cảm ứng được xác định bằng định luật nào trong các định luật sau đây?\",\"options\":{\"A\":\"Định luật Ohm cho vật dẫn kim loại.\",\"B\":\"Định luật Faraday về cảm ứng điện từ.\",\"C\":\"Định luật Lenz về cảm ứng điện từ.\",\"D\":\"Định luật Coulomb về tương tác điện.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Điện Từ Học\",\"sub_topic\":\"Điện Từ Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 470,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":15,\"questionText\":\"Trong kí hiệu hạt nhân $_Z^A X$, $A$ là số\",\"options\":{\"A\":\"positron.\",\"B\":\"nucleon.\",\"C\":\"neutron.\",\"D\":\"proton.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Vật Lý Lượng Tử\",\"sub_topic\":\"Vật Lý Lượng Tử\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 471,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":16,\"questionText\":\"Khi nói về từ trường, phát biểu nào sau đây là đúng?\",\"options\":{\"A\":\"Một dòng điện tạo ra một từ trường đều xung quanh nó.\",\"B\":\"Từ trường tác dụng lực từ lên một nam châm đặt trong đó.\",\"C\":\"Từ trường tác dụng lực từ lên một điện tích đứng yên ở trong đó.\",\"D\":\"Một kim nam châm tạo ra một từ trường đều xung quanh nó.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Điện Từ Học\",\"sub_topic\":\"Điện Từ Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 472,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":17,\"questionText\":\"Đại lượng đặc trưng cho độ bền vững của hạt nhân là\",\"options\":{\"A\":\"năng lượng liên kết.\",\"B\":\"độ hụt khối của hạt nhân.\",\"C\":\"điện tích hạt nhân.\",\"D\":\"năng lượng liên kết riêng.\"},\"correctAnswer\":\"D\",\"main_topic\":\"Vật Lý Lượng Tử\",\"sub_topic\":\"Vật Lý Lượng Tử\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "D"
+  },
+  {
+    "id": 476,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":5,\"questionText\":\"Trong hệ đơn vị SI, đơn vị của từ thông là\",\"options\":{\"A\":\"weber (Wb).\",\"B\":\"tesla (T).\",\"C\":\"coulomb (C).\",\"D\":\"volt (V).\"},\"correctAnswer\":\"A\",\"main_topic\":\"Điện Từ Học\",\"sub_topic\":\"Điện Từ Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "A"
+  },
+  {
+    "id": 478,
+    "quiz_id": 0,
+    "part_number": 2,
+    "question_type": "TRUE_FALSE",
+    "content": "{\"id\":2,\"questionText\":\"Một nam châm được đặt trên cân. Một đoạn dây dẫn cứng được giữ cố định, nằm ngang, vuông góc với các đường sức từ của từ trường đều giữa hai cực của nam châm (hình bên). Cảm ứng từ $\\\\vec{B}$ của từ trường có phương nằm ngang và có độ lớn là $B$. Chiều dài của phần dây dẫn PQ nằm trong vùng từ trường đều giữa hai cực của nam châm là $\\\\ell$. Ban đầu, chưa có dòng điện chạy trong dây dẫn, cân chỉ một giá trị xác định. Sau đó, cho dòng điện không đổi với cường độ $I$ chạy trong dây dẫn theo chiều từ P đến Q. Bỏ qua ảnh hưởng của từ trường Trái Đất.\",\"statements\":{\"a\":\"Cảm ứng từ $\\\\vec{B}$ có hướng từ cực N sang cực S của nam châm.\",\"b\":\"Cân chỉ giá trị nhỏ hơn giá trị ban đầu.\",\"c\":\"Lực từ do từ trường tác dụng lên đoạn dây PQ hướng thẳng đứng lên trên.\",\"d\":\"Lực từ do từ trường tác dụng lên đoạn dây PQ có độ lớn là $BI\\\\ell$.\"},\"correctAnswer\":{\"a\":\"Đ\",\"b\":\"S\",\"c\":\"Đ\",\"d\":\"Đ\"},\"main_topic\":\"Điện Từ Học\",\"sub_topic\":\"Điện Từ Học\",\"part_number\":2,\"question_type\":\"TRUE_FALSE\"}",
+    "answer_data": {
+      "a": "Đ",
+      "b": "S",
+      "c": "Đ",
+      "d": "Đ"
+    }
+  },
+  {
+    "id": 482,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":3,\"questionText\":\"Trong hệ đơn vị SI, đơn vị của nhiệt dung riêng là\",\"options\":{\"A\":\"J/K.\",\"B\":\"J/(kg.K).\",\"C\":\"J/°C.\",\"D\":\"J/kg.\"},\"correctAnswer\":\"B\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "B"
+  },
+  {
+    "id": 483,
+    "quiz_id": 0,
+    "part_number": 1,
+    "question_type": "MCQ",
+    "content": "{\"id\":8,\"questionText\":\"Nội năng của một vật xác định không đổi khi\",\"options\":{\"A\":\"vật truyền năng lượng nhiệt cho vật khác.\",\"B\":\"nhiệt độ của vật thay đổi.\",\"C\":\"nhiệt độ và thể tích của vật không đổi.\",\"D\":\"thể tích của vật thay đổi.\"},\"correctAnswer\":\"C\",\"main_topic\":\"Nhiệt Học\",\"sub_topic\":\"Nhiệt Học\",\"part_number\":1,\"question_type\":\"MCQ\"}",
+    "answer_data": "C"
+  }
+]
