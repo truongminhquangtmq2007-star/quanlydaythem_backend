@@ -745,9 +745,9 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
         }
 
         // 1. LUÔN LUÔN tạo document TRƯỚC
-        let actual_document_id = document_id;
-        let folderId = null;
-        if (!actual_document_id) {
+        let actual_document_id = parseInt(String(document_id), 10);
+          let folderId = null;
+          if (!actual_document_id || actual_document_id === 0) {
             // Find EXAM folder for this class_id
             if (class_id) {
                 const folderCheck = await pool.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
@@ -887,8 +887,8 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
         }
 
         // 1. Tạo hoặc cập nhật Document
-        let actual_document_id = document_id;
-        if (!document_id || document_id === 0) {
+        let actual_document_id = parseInt(String(document_id), 10);
+          if (!actual_document_id || actual_document_id === 0) {
             const docRes = await pool.query(
                 `INSERT INTO documents (title, category, folder_id, teacher_id) 
                  VALUES ($1, 'EXAM', $2, $3) RETURNING id`,
