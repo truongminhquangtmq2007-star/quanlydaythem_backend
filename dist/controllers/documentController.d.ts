@@ -8,6 +8,5 @@ export declare const addDocument: (req: AuthRequest, res: Response) => Promise<v
 export declare const updateDocument: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const deleteDocument: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const getAllDocuments: (req: Request, res: Response) => Promise<void>;
-export declare const uploadDocument: (req: Request, res: Response) => Promise<void>;
 export declare const getDrive: (req: AuthRequest, res: Response) => Promise<void>;
 //# sourceMappingURL=documentController.d.ts.map

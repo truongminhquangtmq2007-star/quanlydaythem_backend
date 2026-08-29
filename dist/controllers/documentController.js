@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getDrive = exports.uploadDocument = exports.getAllDocuments = exports.deleteDocument = exports.updateDocument = exports.addDocument = exports.getFolderContents = exports.deleteFolder = exports.updateFolder = exports.createFolder = void 0;
+exports.getDrive = exports.getAllDocuments = exports.deleteDocument = exports.updateDocument = exports.addDocument = exports.getFolderContents = exports.deleteFolder = exports.updateFolder = exports.createFolder = void 0;
 const db_1 = __importDefault(require("../db"));
 // ---------------------------------------------------------
 // FOLDERS API
@@ -127,11 +127,6 @@ const getAllDocuments = async (req, res) => {
     }
 };
 exports.getAllDocuments = getAllDocuments;
-const uploadDocument = async (req, res) => {
-    // Legacy method fallback
-    res.status(200).json({ message: 'Legacy upload method' });
-};
-exports.uploadDocument = uploadDocument;
 const getDrive = async (req, res) => {
     try {
         const { category, class_id } = req.query;

@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
 const express_1 = __importDefault(require("express"));
-const cors_1 = __importDefault(require("cors")); // Giữ lại 1 dòng import CORS duy nhất
+const cors_1 = __importDefault(require("cors"));
 require("./db");
 const fs_1 = __importDefault(require("fs"));
 const studentRoutes_1 = __importDefault(require("./routes/studentRoutes"));
@@ -46,7 +46,6 @@ app.use('/api/calendar', calendarRoutes_1.default);
 app.use('/api/documents', documentRoutes_1.default);
 app.use('/api/folders', folderRoutes_1.default);
 app.use('/api/sessions', sessionRoutes_1.default);
-app.use('/api/bills', paymentRoutes_1.default);
 app.use('/api/exams', examRoutes_1.default);
 app.use('/api/assignments', assignmentRoutes_1.default);
 app.use('/api/analytics', analyticsRoutes_1.default);
