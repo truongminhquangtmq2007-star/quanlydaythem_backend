@@ -79,6 +79,14 @@ export const updateClass = async (req: AuthRequest, res: Response): Promise<void
   const { id } = req.params;
   const { class_name, description, teacher_id, class_type, meet_link } = req.body; 
   try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+        const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
+        if (check.rows.length === 0) {
+            res.status(403).json({ message: "Bạn không có quyền sửa lớp này" });
+            return;
+        }
+    }
     await pool.query(
       `UPDATE classes SET class_name = $1, description = $2, teacher_id = $3, class_type = $4, meet_link = $5 WHERE id = $6`,
       [class_name, description, teacher_id || null, class_type || 'OFFLINE', meet_link || null, id]
@@ -90,9 +98,18 @@ export const updateClass = async (req: AuthRequest, res: Response): Promise<void
 };
 
 // 4. Xóa lớp học (DELETE)
-export const deleteClass = async (req: Request, res: Response): Promise<void> => {
+export const deleteClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+        const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
+        if (check.rows.length === 0) {
+            res.status(403).json({ message: "Bạn không có quyền xóa lớp này" });
+            return;
+        }
+    }
+    
     try { await pool.query('ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE'); } catch(e){}
     try { await pool.query('UPDATE classes SET is_active = TRUE WHERE is_active IS NULL'); } catch(e){}
 
@@ -109,8 +126,18 @@ export const deleteClass = async (req: Request, res: Response): Promise<void> =>
 };
 
 // 5. Gán giáo viên cho lớp học
-export const assignTeacher = async (req: Request, res: Response): Promise<void> => {
+export const assignTeacher = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+      const checkClassId = req.params.id;
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+        return;
+      }
+    }
+
     const classId = req.params.id;
     const { teacher_id } = req.body;
     const result = await pool.query(
@@ -131,8 +158,18 @@ export const assignTeacher = async (req: Request, res: Response): Promise<void> 
 // API MỚI CHO PHASE 1 - CORE
 // ==========================================
 
-export const getClassMembers = async (req: Request, res: Response): Promise<void> => {
+export const getClassMembers = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+      const checkClassId = req.params.id;
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+        return;
+      }
+    }
+
     const { id } = req.params;
     const result = await pool.query(
       'SELECT s.id, s.full_name, s.phone_number AS phone FROM students s JOIN enrollments cm ON s.id = cm.student_id WHERE cm.class_id = $1 ORDER BY s.full_name',
@@ -145,8 +182,18 @@ export const getClassMembers = async (req: Request, res: Response): Promise<void
   }
 };
 
-export const getClassSessions = async (req: Request, res: Response): Promise<void> => {
+export const getClassSessions = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+      const checkClassId = req.params.id;
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+        return;
+      }
+    }
+
     const { id } = req.params;
     const result = await pool.query(
       `SELECT * FROM sessions WHERE class_id = $1 ORDER BY session_date DESC`,
@@ -159,7 +206,7 @@ export const getClassSessions = async (req: Request, res: Response): Promise<voi
   }
 };
 
-export const getSessionAttendance = async (req: Request, res: Response): Promise<void> => {
+export const getSessionAttendance = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params; // session_id
     // 1. Get session info
@@ -185,10 +232,20 @@ export const getSessionAttendance = async (req: Request, res: Response): Promise
 };
 
 // POST /api/classes/:id/members
-export const addMember = async (req: Request, res: Response): Promise<void> => {
+export const addMember = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params; // class_id
   const { student_id } = req.body;
   try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+      const checkClassId = req.params.id;
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+        return;
+      }
+    }
+
     const result = await pool.query(
       `INSERT INTO enrollments (class_id, student_id) VALUES ($1, $2) RETURNING *`,
       [id, student_id]
@@ -205,12 +262,22 @@ export const addMember = async (req: Request, res: Response): Promise<void> => {
 };
 
 // POST /api/classes/:id/sessions
-export const createSession = async (req: Request, res: Response): Promise<void> => {
+export const createSession = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params; // class_id
   const { session_date, start_time, end_time, content } = req.body;
   
   const client = await pool.connect();
   try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+      const checkClassId = req.params.id;
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+        return;
+      }
+    }
+
     await client.query('BEGIN');
     
     // 1. Tạo buổi học
@@ -286,7 +353,7 @@ export const createSession = async (req: Request, res: Response): Promise<void> 
 };
 
 // PUT /api/sessions/:id/attendance (Được định tuyến qua classRoutes hoặc sessionRoutes)
-export const updateAttendance = async (req: Request, res: Response): Promise<void> => {
+export const updateAttendance = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params; // session_id
   const { student_id, status, note } = req.body;
   try {

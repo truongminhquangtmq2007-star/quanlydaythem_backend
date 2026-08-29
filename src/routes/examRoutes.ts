@@ -28,18 +28,18 @@ const upload = multer({ storage: multer.memoryStorage() });
 // ROUTES CHO GIÁO VIÊN
 // ==========================================
 // 1. Nhập/Sửa đáp án thủ công
-router.post('/key', verifyToken, saveAnswerKey);
+router.post('/key', verifyToken, isTeacherOrAdmin, saveAnswerKey);
 
 // 2. Tự động bóc tách đề và tạo đáp án bằng AI (Text)
 // Sửa dòng này:
-router.post('/parse-ai-text', verifyToken, createExamFromText);
+router.post('/parse-ai-text', verifyToken, isTeacherOrAdmin, createExamFromText);
 // 3. Tự động bóc tách đề từ FILE (PDF/Ảnh)
-router.post('/parse-ai-file', verifyToken, uploadMemory.single('examFile'), parseExamFromFile);
+router.post('/parse-ai-file', verifyToken, isTeacherOrAdmin, uploadMemory.single('examFile'), parseExamFromFile);
 // 4. Lấy danh sách học sinh đã nộp bài của một đề
-router.get('/:document_id/submissions', verifyToken, getExamSubmissions);
+router.get('/:document_id/submissions', verifyToken, isTeacherOrAdmin, getExamSubmissions);
 
 // 5. Lấy lại đáp án chuẩn đã lưu
-router.get('/key/:document_id', verifyToken, getExamKey);
+router.get('/key/:document_id', verifyToken, isTeacherOrAdmin, getExamKey);
 
 
 // ==========================================

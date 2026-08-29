@@ -15,6 +15,16 @@ cloudinary.config({
 // ========================================================
 // 1. KHO LƯU CLOUDINARY (Dùng cho upload tài liệu, lưu ảnh câu hỏi)
 // ========================================================
+
+const fileFilter = (req: any, file: any, cb: any) => {
+    const allowedMimeTypes = ['application/pdf', 'image/jpeg', 'image/png', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword'];
+    if (allowedMimeTypes.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error('Invalid file type. Only PDF, JPG, PNG and DOCX are allowed.'));
+    }
+};
+
 const cloudStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
@@ -26,11 +36,13 @@ const cloudStorage = new CloudinaryStorage({
   },
 });
 // Đổi tên thành uploadCloud để dễ phân biệt
-export const uploadCloud = multer({ storage: cloudStorage });
+export const uploadCloud = multer({ storage: cloudStorage, fileFilter });
 
 
 // ========================================================
 // 2. KHO LƯU RAM (Dùng RIÊNG cho Gemini AI bóc tách đề)
 // ========================================================
+
+
 const memoryStorage = multer.memoryStorage();
-export const uploadMemory = multer({ storage: memoryStorage });
+export const uploadMemory = multer({ storage: memoryStorage, fileFilter });
