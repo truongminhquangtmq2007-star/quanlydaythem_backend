@@ -27,11 +27,11 @@ export const getStudentTopics = async (req: AuthRequest, res: Response): Promise
 
         // Mock data fallback
         const mockData = [
-            { topic: 'Tích phân', attempt_count: 20, correct_count: 16, accuracy_rate: 80.0 },
-            { topic: 'Đạo hàm', attempt_count: 15, correct_count: 12, accuracy_rate: 80.0 },
-            { topic: 'Hình học không gian', attempt_count: 10, correct_count: 6, accuracy_rate: 60.0 },
-            { topic: 'Lượng giác', attempt_count: 12, correct_count: 5, accuracy_rate: 41.7 },
-            { topic: 'Tổ hợp - Xác suất', attempt_count: 8, correct_count: 7, accuracy_rate: 87.5 },
+            { topic: 'Tích phân', total_questions: 20, correct_answers: 16, accuracy_rate: 80.0 },
+            { topic: 'Đạo hàm', total_questions: 15, correct_answers: 12, accuracy_rate: 80.0 },
+            { topic: 'Hình học không gian', total_questions: 10, correct_answers: 6, accuracy_rate: 60.0 },
+            { topic: 'Lượng giác', total_questions: 12, correct_answers: 5, accuracy_rate: 41.7 },
+            { topic: 'Tổ hợp - Xác suất', total_questions: 8, correct_answers: 7, accuracy_rate: 87.5 },
         ];
         res.status(200).json(mockData);
     } catch (error) {
@@ -63,14 +63,14 @@ export const getClassWeakTopics = async (req: AuthRequest, res: Response): Promi
             const result = await pool.query(
                 `SELECT 
                     stp.topic, 
-                    SUM(stp.attempt_count) as total_attempts,
-                    SUM(stp.correct_count) as total_corrects,
-                    ROUND(CAST(SUM(stp.correct_count) AS NUMERIC) * 100.0 / SUM(stp.attempt_count), 2) as accuracy_rate
+                    SUM(stp.total_questions) as total_attempts,
+                    SUM(stp.correct_answers) as total_corrects,
+                    ROUND(CAST(SUM(stp.correct_answers) AS NUMERIC) * 100.0 / SUM(stp.total_questions), 2) as accuracy_rate
                  FROM student_topic_performance stp
                  JOIN enrollments cm ON stp.student_id = cm.student_id
                  WHERE cm.class_id = $1 AND cm.status = 'ACTIVE'
                  GROUP BY stp.topic
-                 HAVING SUM(stp.attempt_count) > 0
+                 HAVING SUM(stp.total_questions) > 0
                  ORDER BY accuracy_rate ASC
                  LIMIT 10`,
                 [id]
