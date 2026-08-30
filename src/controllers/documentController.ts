@@ -146,8 +146,8 @@ export const getDrive = async (req: AuthRequest, res: Response): Promise<void> =
     const params: any[] = [];
     let paramIdx = 1;
     if (req.user && req.user.role === 'TEACHER') {
-        foldersQuery += ' LEFT JOIN classes c ON f.class_id = c.id WHERE (c.teacher_id = $' + paramIdx + ') ';
-        docsQuery += ' LEFT JOIN folders fd ON d.folder_id = fd.id LEFT JOIN classes c2 ON fd.class_id = c2.id WHERE (c2.teacher_id = $' + paramIdx + ' OR d.teacher_id = $' + paramIdx + ') ';
+        foldersQuery += ' LEFT JOIN classes c ON f.class_id = c.id WHERE (f.teacher_id = $' + paramIdx + ' OR c.teacher_id = $' + paramIdx + ') ';
+        docsQuery += ' LEFT JOIN folders fd ON d.folder_id = fd.id LEFT JOIN classes c2 ON fd.class_id = c2.id WHERE (d.teacher_id = $' + paramIdx + ' OR fd.teacher_id = $' + paramIdx + ' OR c2.teacher_id = $' + paramIdx + ') ';
         params.push(req.user.id);
         paramIdx++;
     } else {

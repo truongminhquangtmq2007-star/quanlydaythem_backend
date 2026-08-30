@@ -13,6 +13,31 @@ export interface AuthRequest extends Request {
 }
 
 // LẤY DANH SÁCH HỌC SINH (HỖ TRỢ SEARCH & LỌC KHỐI)
+
+export const searchGlobalStudents = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { q } = req.query;
+        if (!q || typeof q !== 'string' || q.length < 2) {
+            res.status(200).json([]);
+            return;
+        }
+        
+        const query = `
+            SELECT id, full_name, phone_number, school_name, email
+            FROM students 
+            WHERE (is_active = TRUE OR is_active IS NULL)
+            AND (full_name ILIKE $1 OR phone_number ILIKE $1 OR email ILIKE $1)
+            ORDER BY full_name ASC LIMIT 20
+        `;
+        
+        const result = await pool.query(query, [`%${q}%`]);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Lỗi tìm kiếm học sinh" });
+    }
+};
+
 export const getStudents = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { search, grade } = req.query;
@@ -52,34 +77,35 @@ export const getStudents = async (req: AuthRequest, res: Response): Promise<void
 
 // THÊM HỌC SINH MỚI
 export const createStudent = async (req: AuthRequest, res: Response): Promise<void> => {
-  let { student_code, full_name, phone, phone_number, parent_phone, school, school_name, grade, current_level, email, password } = req.body;
+  const { full_name, date_of_birth, phone_number, school_name, notes, email, password } = req.body;
   const user = req.user;
 
-  if (!student_code) {
-    student_code = 'HS' + Date.now().toString().slice(-6);
-  }
-  const phoneToUse = phone || phone_number || '';
-  const schoolToUse = school || school_name || '';
-
   try {
+    const passwordHash = await bcrypt.hash(password || '123456', 10);
+    const username = phone_number;
+
     const result = await pool.query(
-      `INSERT INTO students (student_code, full_name, phone_number, parent_phone, school_name, school, grade, current_level, email) 
-       VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8) RETURNING *`,
-      [student_code, full_name, phoneToUse, parent_phone, schoolToUse, grade, current_level, email || null]
+      `INSERT INTO students (
+        full_name, date_of_birth, phone_number, school_name, notes,
+        email, teacher_id, username, password
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [
+        full_name,
+        date_of_birth || null,
+        phone_number,
+        school_name || null,
+        notes || null,
+        email || null,
+        user?.id || null,
+        username,
+        passwordHash
+      ]
     );
 
     const student = result.rows[0];
 
-    // Tạo tài khoản đăng nhập cho học sinh (Role = 'STUDENT')
     try {
-      const username = phoneToUse || student_code;
-      const userEmail = email || `${username.toLowerCase()}@student.local`; // Cần cho DB schema cũ nếu email NOT NULL
-      const bcrypt = require('bcrypt');
-      const passwordHash = await bcrypt.hash(password || '123456', 10);
-      
-      // Kiểm tra cột username trong users
-      try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255) UNIQUE;`); } catch(e){}
-
+      const userEmail = email || `${username.toLowerCase()}@student.local`;
       await pool.query(
         `INSERT INTO users (username, email, password_hash, role, full_name, student_id) VALUES ($1, $2, $3, $4, $5, $6)`,
         [username, userEmail, passwordHash, 'STUDENT', full_name, student.id]
@@ -93,27 +119,10 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
       student: student
     });
   } catch (error: any) {
-    // Fallback cho schema cũ nếu initCore.sql chưa được chạy hoàn chỉnh
-    try {
-      const username = phoneToUse || student_code;
-      const bcrypt = require('bcrypt');
-      const hashedPassword = await bcrypt.hash(password || '123456', 10);
-      const fallback = await pool.query(
-        `INSERT INTO students (full_name, phone_number, username, password, teacher_id) 
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [full_name, phoneToUse, username, hashedPassword, user?.id || null]
-      );
-      res.status(201).json({
-        message: 'Thêm học sinh thành công (schema cũ)',
-        student: fallback.rows[0]
-      });
-    } catch (e) {
-      console.error(error);
-      res.status(500).json({ message: 'Lỗi máy chủ nội bộ' });
-    }
+    console.error('Lỗi tạo học sinh:', error);
+    res.status(500).json({ message: 'Lỗi máy chủ nội bộ' });
   }
 };
-
 
 export const getProfile360 = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -125,7 +134,6 @@ export const getProfile360 = async (req: AuthRequest, res: Response): Promise<vo
     }
     const student = studentRes.rows[0];
 
-    // Lấy lớp học (sửa class_members thành enrollments)
     const classRes = await pool.query(
       'SELECT c.class_name, c.schedule, c.meet_link FROM enrollments e JOIN classes c ON e.class_id = c.id WHERE e.student_id = $1 AND e.status = \'ACTIVE\'',
       [id]
@@ -153,8 +161,8 @@ export const getProfile360 = async (req: AuthRequest, res: Response): Promise<vo
 };
 
 export const updateStudent = async (req: AuthRequest, res: Response): Promise<void> => {
-  const { id } = req.params; 
-  const { full_name, phone, phone_number, parent_phone, school, school_name, grade, current_level, email } = req.body; 
+  const { id } = req.params;
+  const { full_name, phone, phone_number, parent_phone, school, school_name, grade, current_level, email } = req.body;
   try {
     const phoneToUse = phone_number || phone;
     const schoolToUse = school_name || school;
@@ -171,9 +179,6 @@ export const updateStudent = async (req: AuthRequest, res: Response): Promise<vo
 export const deleteStudent = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    try { await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE'); } catch(e){}
-    try { await pool.query('UPDATE students SET is_active = TRUE WHERE is_active IS NULL'); } catch(e){}
-
     await pool.query('UPDATE students SET is_active = FALSE WHERE id = $1', [id]);
     res.status(200).json({ message: "Đã xóa (ẩn) học sinh thành công" });
   } catch (error) {

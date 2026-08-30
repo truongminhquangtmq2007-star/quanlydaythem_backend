@@ -8,7 +8,7 @@ const studentSchema = Joi.object({
     'string.min': 'Tên học sinh phải có ít nhất 3 ký tự.',
     'any.required': 'Bắt buộc phải nhập tên học sinh.'
   }),
-  phone_number: Joi.string().pattern(/^[0-9]{10}$/).required().messages({
+  phone_number: Joi.string().trim().pattern(/^[0-9]{10}$/).required().messages({
     'string.pattern.base': 'Số điện thoại không hợp lệ (phải chứa đúng 10 chữ số).',
     'string.empty': 'Số điện thoại không được để trống.',
     'any.required': 'Bắt buộc phải nhập số điện thoại.'
@@ -24,14 +24,25 @@ const studentSchema = Joi.object({
 
 // 2. Hàm Middleware để kiểm tra trước khi cho phép lưu vào Database
 export const validateStudent = (req: Request, res: Response, next: NextFunction): void => {
-  const { error } = studentSchema.validate(req.body);
+  const body = { ...req.body };
+
+  if (body.phone_number == null && typeof body.phone === 'string') {
+    body.phone_number = body.phone;
+  }
+  if (body.school_name == null && typeof body.school === 'string') {
+    body.school_name = body.school;
+  }
+
+  const { error, value } = studentSchema.validate(body);
   
   if (error) {
     // Nếu có lỗi, chặn lại ngay và báo lỗi 400 (Bad Request)
     res.status(400).json({ message: error.details[0].message });
     return;
   }
-  
+
+  req.body = value;
+
   // Nếu dữ liệu sạch sẽ, cho phép đi tiếp đến Controller
   next();
 };

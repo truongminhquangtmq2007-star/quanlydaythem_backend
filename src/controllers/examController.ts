@@ -162,7 +162,7 @@ const normalizeShortAnswer = (value: any): string => {
 // ========================================================
 export const getDraftExam = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.id;
+        const studentId = req.user?.student_id || req.user?.id;
         const examId = req.params.id;
         const result = await pool.query(
             `SELECT student_answers, last_saved_at, time_taken_seconds FROM exam_submissions 
@@ -475,7 +475,7 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
                         part3: { correct: p3Correct, total: p3Total, score: prev.part3_score }
                     },
                     cheat_count: prev.cheat_count,
-                    details: typeof prev.answers === 'string' ? JSON.parse(prev.answers) : prev.answers
+                    details: (typeof prev.answers === 'string' ? JSON.parse(prev.answers) : prev.answers).map((d: any) => answerKey.allow_view_answers ? d : { ...d, correct_answer: undefined, is_correct: undefined, statement_results: undefined })
                 });
                 return;
             }
@@ -595,7 +595,7 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
                 part3: { correct: p3Correct, total: p3Total, score: roundedP3Score }
             },
             cheat_count: cheatCountNum,
-            details: details
+            details: details.map((d: any) => answerKey.allow_view_answers ? d : { ...d, correct_answer: undefined, is_correct: undefined, statement_results: undefined })
         });
     } catch (error) {
         console.error('Lỗi chấm điểm:', error);
@@ -609,6 +609,28 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
 export const getExamSubmissions = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { document_id } = req.params;
+
+        if (req.user?.role === 'TEACHER') {
+            const authCheck = await pool.query(
+                `SELECT c.teacher_id 
+                 FROM documents d
+                 JOIN folders f ON d.folder_id = f.id
+                 JOIN classes c ON f.class_id = c.id
+                 WHERE d.id = $1`,
+                [document_id]
+            );
+
+            if (authCheck.rows.length === 0) {
+                res.status(404).json({ message: 'Exam not found' });
+                return;
+            }
+
+            if (authCheck.rows[0].teacher_id !== req.user?.id) {
+                res.status(403).json({ message: 'Unauthorized access to this exam submissions' });
+                return;
+            }
+        }
+
         const result = await pool.query(
             `SELECT 
                 es.id,
@@ -672,30 +694,108 @@ export const getMySubmissions = async (req: AuthRequest, res: Response): Promise
 // ========================================================
 // 5. API GIÁO VIÊN/HỌC SINH: LẤY DỮ LIỆU ĐỀ THI
 // ========================================================
+
+// Helper: Xóa đáp án khỏi nội dung đề thi cho học sinh
+const sanitizeExamContentForStudent = (content: any): any => {
+    if (!content) return content;
+    
+    let parsedContent;
+    let isString = false;
+    
+    if (typeof content === 'string') {
+        try {
+            parsedContent = JSON.parse(content);
+            isString = true;
+        } catch (e) {
+            return content; 
+        }
+    } else if (typeof content === 'object') {
+        parsedContent = JSON.parse(JSON.stringify(content));
+    } else {
+        return content;
+    }
+
+    const stripAnswers = (obj: any) => {
+        if (Array.isArray(obj)) {
+            obj.forEach(item => stripAnswers(item));
+        } else if (obj !== null && typeof obj === 'object') {
+            delete obj.correctAnswer;
+            delete obj.answer; 
+            Object.keys(obj).forEach(key => stripAnswers(obj[key]));
+        }
+    };
+
+    stripAnswers(parsedContent);
+    return isString ? JSON.stringify(parsedContent) : parsedContent;
+};
+
 export const getExamKey = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { document_id } = req.params;
+        const userRole = req.user?.role;
+        const userId = req.user?.id;
+        const studentId = req.user?.student_id;
+        const contentOnly = req.query.contentOnly === 'true';
         
-        // CẬP NHẬT LỆNH SQL: SELECT THÊM exam_content ĐỂ TRẢ VỀ CHO FRONTEND
         const result = await pool.query(
-            `SELECT part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content 
-             FROM exam_keys WHERE document_id = $1`,
+            `SELECT ek.*, c.teacher_id, c.id AS class_id
+             FROM exam_keys ek
+             JOIN documents d ON ek.document_id = d.id
+             JOIN folders f ON d.folder_id = f.id
+             JOIN classes c ON f.class_id = c.id
+             WHERE ek.document_id = $1`,
             [document_id]
         );
         
-        if (result.rows.length > 0) {
-            res.status(200).json(result.rows[0]);
-        } else {
-            res.status(200).json(null);
+        if (result.rows.length === 0) {
+            res.status(404).json({ message: 'Không tìm thấy đáp án cho đề thi này!' });
+            return;
         }
+
+        const examData = result.rows[0];
+
+        if (userRole === 'STUDENT') {
+            const enrollCheck = await pool.query('SELECT 1 FROM enrollments WHERE student_id = $1 AND class_id = $2 AND status != $3', [studentId, examData.class_id, 'DROPPED']);
+            if (enrollCheck.rows.length === 0) {
+                res.status(403).json({ message: 'Bạn không có quyền truy cập đề thi của lớp này.' });
+                return;
+            }
+
+            let sanitizedContent = examData.exam_content;
+            if (contentOnly || !examData.allow_view_answers) {
+                sanitizedContent = sanitizeExamContentForStudent(examData.exam_content);
+            }
+
+            const studentResponse: any = {
+                document_id: examData.document_id,
+                class_id: examData.class_id,
+                allow_view_answers: examData.allow_view_answers,
+                duration_minutes: examData.duration_minutes,
+                exam_content: sanitizedContent
+            };
+
+            if (!contentOnly && examData.allow_view_answers) {
+                studentResponse.part1_key = examData.part1_key;
+                studentResponse.part2_key = examData.part2_key;
+                studentResponse.part3_key = examData.part3_key;
+            }
+
+            res.status(200).json(studentResponse);
+            return;
+        } else if (userRole === 'TEACHER' && examData.teacher_id !== userId) {
+            res.status(403).json({ message: 'Bạn không có quyền truy cập đề thi của giáo viên khác.' });
+            return;
+        }
+        
+        res.status(200).json(examData);
     } catch (error) {
-        console.error('Lỗi lấy dữ liệu đề thi:', error);
-        res.status(500).json({ message: 'Lỗi server' });
+        console.error('LỖI LẤY ĐÁP ÁN:', error);
+        res.status(500).json({ message: 'Lỗi server', detail: (error as Error).message });
     }
 };
 
 // ========================================================
-// 6. API MỚI: TỰ ĐỘNG TẠO ĐỀ VÀ ĐÁP ÁN TỪ VĂN BẢN (GEMINI)
+// 7. API MỚI: TỰ ĐỘNG TẠO ĐỀ TỪ FILE (PDF/ẢNH)
 // ========================================================
 export const createExamFromText = async (req: AuthRequest, res: Response): Promise<void> => {
     const { rawText, class_id, document_id, durationMinutes } = req.body;

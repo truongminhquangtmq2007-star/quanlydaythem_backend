@@ -164,7 +164,7 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
   JOIN folders f ON d.folder_id = f.id
   JOIN classes c ON f.class_id = c.id
   JOIN enrollments e ON e.class_id = c.id
-  WHERE e.student_id = $1
+  WHERE e.student_id = $1 AND d.category = 'EXAM' AND e.status != 'DROPPED'
             ORDER BY d.uploaded_at DESC
             LIMIT 20
         `;
@@ -172,6 +172,34 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
         res.status(200).json(result.rows);
     } catch (error) {
         console.error("LỖI getDocuments:", error);
+        res.status(500).json({ message: 'Lỗi server' });
+    }
+};
+
+
+export const getExams = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const studentId = req.user?.student_id;
+        if (!studentId) {
+            res.status(403).json({ message: 'Không có quyền' });
+            return;
+        }
+
+        const query = `
+            SELECT d.id, d.title, d.category AS type, d.file_url, d.uploaded_at AS created_at, c.class_name, ek.duration_minutes, NULL AS due_at
+            FROM documents d
+            JOIN folders f ON d.folder_id = f.id
+            JOIN classes c ON f.class_id = c.id
+            JOIN enrollments e ON e.class_id = c.id
+            JOIN exam_keys ek ON d.id = ek.document_id
+            WHERE e.student_id = $1
+            ORDER BY d.uploaded_at DESC
+            LIMIT 20
+        `;
+        const result = await pool.query(query, [studentId]);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("LỖI getExams:", error);
         res.status(500).json({ message: 'Lỗi server' });
     }
 };

@@ -36,10 +36,10 @@ router.post('/parse-ai-text', verifyToken, isTeacherOrAdmin, createExamFromText)
 // 3. Tự động bóc tách đề từ FILE (PDF/Ảnh)
 router.post('/parse-ai-file', verifyToken, isTeacherOrAdmin, uploadMemory.single('examFile'), parseExamFromFile);
 // 4. Lấy danh sách học sinh đã nộp bài của một đề
-router.get('/:document_id/submissions', verifyToken, isTeacherOrAdmin, getExamSubmissions);
+// Moved down
 
 // 5. Lấy lại đáp án chuẩn đã lưu
-router.get('/key/:document_id', verifyToken, isTeacherOrAdmin, getExamKey);
+router.get('/key/:document_id', verifyToken, getExamKey);
 
 
 // ==========================================
@@ -57,6 +57,8 @@ router.post('/submit', verifyToken, submitExam);
 // 7. Lấy lịch sử điểm thi cá nhân
 router.get('/my-submissions', verifyToken, getMySubmissions);
 
-export default router;
+router.get('/:document_id/submissions', verifyToken, isTeacherOrAdmin, getExamSubmissions);
 // Gia sư AI giải đáp thắc mắc
 router.post('/ask-tutor', verifyToken, askAITutor);
+
+export default router;

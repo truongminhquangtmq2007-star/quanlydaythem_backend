@@ -18,10 +18,10 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
 
     let result;
     if (user.role === 'ADMIN') {
-      result = await pool.query('SELECT * FROM classes WHERE is_active = TRUE OR is_active IS NULL ORDER BY id DESC');
+      result = await pool.query(`SELECT c.*, (SELECT COUNT(*) FROM enrollments e WHERE e.class_id = c.id AND e.status != 'DROPPED') as current_students FROM classes c WHERE c.is_active = TRUE OR c.is_active IS NULL ORDER BY c.id DESC`);
     } else {
       result = await pool.query(
-        'SELECT * FROM classes WHERE teacher_id = $1 AND (is_active = TRUE OR is_active IS NULL) ORDER BY id DESC', 
+        `SELECT c.*, (SELECT COUNT(*) FROM enrollments e WHERE e.class_id = c.id AND e.status != 'DROPPED') as current_students FROM classes c WHERE c.teacher_id = $1 AND (c.is_active = TRUE OR c.is_active IS NULL) ORDER BY c.id DESC`, 
         [user.id]
       );
     }
