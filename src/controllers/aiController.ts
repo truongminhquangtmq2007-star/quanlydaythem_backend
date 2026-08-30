@@ -68,5 +68,132 @@ Bối cảnh học sinh:
 };
 
 export const generateRemark = async (req: AuthRequest, res: Response): Promise<void> => {
-    res.status(503).json({ status: "maintenance", message: "Tính năng AI đang bảo trì." });
+    try {
+        const { student_id, month } = req.body;
+        
+        if (!student_id || !month) {
+            res.status(400).json({ message: 'Thiếu student_id hoặc month (định dạng YYYY-MM).' });
+            return;
+        }
+
+        const studentRes = await pool.query('SELECT full_name, learning_goals FROM students WHERE id = $1', [student_id]);
+        if (studentRes.rows.length === 0) {
+            res.status(404).json({ message: 'Không tìm thấy học sinh.' });
+            return;
+        }
+        
+        const student = studentRes.rows[0];
+
+        // Lấy dữ liệu attendance trong tháng
+        const attendanceRes = await pool.query(
+            `SELECT status, COUNT(*) as count FROM attendance 
+             WHERE student_id = $1 AND to_char(date, 'YYYY-MM') = $2 
+             GROUP BY status`, 
+            [student_id, month]
+        );
+        let present = 0, absent = 0, late = 0;
+        attendanceRes.rows.forEach(r => {
+            if (r.status === 'PRESENT') present = parseInt(r.count, 10);
+            if (r.status === 'ABSENT') absent = parseInt(r.count, 10);
+            if (r.status === 'LATE') late = parseInt(r.count, 10);
+        });
+
+        // Lấy dữ liệu thi cử trong tháng
+        const examRes = await pool.query(
+            `SELECT AVG(total_score) as avg_score, COUNT(*) as total_exams 
+             FROM exam_submissions 
+             WHERE student_id = $1 AND to_char(submitted_at, 'YYYY-MM') = $2`,
+            [student_id, month]
+        );
+        const avgScore = examRes.rows[0].avg_score ? parseFloat(examRes.rows[0].avg_score).toFixed(2) : null;
+        const totalExams = parseInt(examRes.rows[0].total_exams, 10);
+
+        // Lấy dữ liệu topic
+        const topicRes = await pool.query(
+            `SELECT topic_name, accuracy_rate FROM student_topic_performance WHERE student_id = $1 ORDER BY accuracy_rate DESC`,
+            [student_id]
+        );
+        
+        let strongTopics = [];
+        let weakTopics = [];
+        if (topicRes.rows.length > 0) {
+            strongTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) >= 80).map(t => t.topic_name);
+            weakTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) < 50).map(t => t.topic_name);
+        }
+
+        const dataSummary = {
+            attendance: { present, absent, late },
+            exams: { avgScore, totalExams },
+            topics: { strongTopics, weakTopics }
+        };
+
+        const prompt = `Bạn là một giáo viên chuyên nghiệp. Dựa vào dữ liệu tháng ${month} của học sinh ${student.full_name}, hãy viết một nhận xét học tập gửi cho phụ huynh.
+Quy tắc: 
+- Văn phong giáo viên, tích cực, lịch sự, phù hợp với phụ huynh.
+- KHÔNG bịa dữ liệu. CHỈ dùng số liệu sau đây:
+    + Số buổi học: Có mặt: ${present}, Vắng: ${absent}, Đi trễ: ${late}
+    + Kiểm tra: Làm ${totalExams} bài, Điểm trung bình: ${avgScore ? avgScore : 'Chưa có'}
+    + Điểm mạnh (chuyên đề tốt): ${strongTopics.length > 0 ? strongTopics.join(', ') : 'Đang cập nhật'}
+    + Cần cải thiện (chuyên đề yếu): ${weakTopics.length > 0 ? weakTopics.join(', ') : 'Đang cập nhật'}
+    + Mục tiêu học sinh đã đặt: ${student.learning_goals || 'Không có'}
+- Nếu không có bài kiểm tra nào, KHÔNG nhắc đến điểm số.
+- Phải có: Tóm tắt chung, Điểm mạnh, Cần cải thiện, và Lời khuyên.
+
+Trả về chuỗi văn bản (plain text) có xuống dòng hợp lý, KHÔNG CẦN định dạng JSON hay Markdown phức tạp.`;
+
+        const remarkText = await generateWithFallback(prompt);
+        
+        res.status(200).json({ remark: remarkText, data_summary: dataSummary });
+    } catch (error) {
+        console.error('Lỗi generateRemark:', error);
+        res.status(500).json({ message: 'Lỗi server khi tạo nhận xét AI.' });
+    }
 };
+
+export const getRemark = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { studentId, month } = req.params;
+        const result = await pool.query(
+            'SELECT remark_text FROM monthly_student_reports WHERE student_id = $1 AND month = $2',
+            [studentId, month]
+        );
+        if (result.rows.length > 0) {
+            res.status(200).json({ remark: result.rows[0].remark_text });
+        } else {
+            res.status(200).json({ remark: '' });
+        }
+    } catch (error) {
+        console.error('Lỗi getRemark:', error);
+        res.status(500).json({ message: 'Lỗi lấy nhận xét.' });
+    }
+};
+
+export const saveRemark = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { student_id, month, remark_text, data_summary } = req.body;
+        
+        if (!student_id || !month || !remark_text) {
+            res.status(400).json({ message: 'Thiếu thông tin bắt buộc.' });
+            return;
+        }
+
+        const dataSumJson = data_summary ? JSON.stringify(data_summary) : '{}';
+        
+        await pool.query(
+            `INSERT INTO monthly_student_reports (student_id, month, remark_text, data_summary, edited_by, updated_at) 
+             VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+             ON CONFLICT (student_id, month) DO UPDATE SET 
+                remark_text = EXCLUDED.remark_text,
+                data_summary = EXCLUDED.data_summary,
+                edited_by = EXCLUDED.edited_by,
+                updated_at = CURRENT_TIMESTAMP`,
+            [student_id, month, remark_text, dataSumJson, req.user?.id]
+        );
+        
+        res.status(200).json({ message: 'Đã lưu nhận xét.' });
+    } catch (error) {
+        console.error('Lỗi saveRemark:', error);
+        res.status(500).json({ message: 'Lỗi server khi lưu nhận xét.' });
+    }
+};
+

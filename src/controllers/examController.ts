@@ -1,3 +1,4 @@
+import { v2 as cloudinary } from 'cloudinary';
 import { generateWithFallback } from '../services/geminiService';
 import { Response } from 'express';
 import pool from '../db';
@@ -744,6 +745,30 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
             return;
         }
 
+        let secure_url = '';
+        try {
+            secure_url = await new Promise((resolve, reject) => {
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    { folder: 'documents', resource_type: 'auto' },
+                    (error, result) => {
+                        if (error) reject(error);
+                        else resolve(result.secure_url);
+                    }
+                );
+                uploadStream.end(file.buffer);
+            });
+        } catch (uploadError) {
+            console.error('Cloudinary upload error:', uploadError);
+            res.status(500).json({ message: 'Lỗi tải file lên máy chủ lưu trữ (Cloudinary).' });
+            return;
+        }
+
+        if (!secure_url) {
+            res.status(500).json({ message: 'Không lấy được URL file.' });
+            return;
+        }
+
+
         // 1. LUÔN LUÔN tạo document TRƯỚC
         let actual_document_id = parseInt(String(document_id), 10);
           let folderId = null;
@@ -764,7 +789,7 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
             
             const docRes = await pool.query(
                 `INSERT INTO documents (title, file_url, category, folder_id) VALUES ($1, $2, 'EXAM', $3) RETURNING id`,
-                [file.originalname || 'Đề thi tự động tạo', file.path, folderId]
+                [file.originalname || 'Đề thi tự động tạo', secure_url, folderId]
             );
             actual_document_id = docRes.rows[0].id;
         }

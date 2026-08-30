@@ -62,14 +62,14 @@ export const getClassWeakTopics = async (req: AuthRequest, res: Response): Promi
         try {
             const result = await pool.query(
                 `SELECT 
-                    stp.topic, 
+                    stp.topic_name AS topic, 
                     SUM(stp.total_questions) as total_attempts,
                     SUM(stp.correct_answers) as total_corrects,
                     ROUND(CAST(SUM(stp.correct_answers) AS NUMERIC) * 100.0 / SUM(stp.total_questions), 2) as accuracy_rate
                  FROM student_topic_performance stp
                  JOIN enrollments cm ON stp.student_id = cm.student_id
                  WHERE cm.class_id = $1 AND cm.status = 'ACTIVE'
-                 GROUP BY stp.topic
+                 GROUP BY stp.topic_name
                  HAVING SUM(stp.total_questions) > 0
                  ORDER BY accuracy_rate ASC
                  LIMIT 10`,
