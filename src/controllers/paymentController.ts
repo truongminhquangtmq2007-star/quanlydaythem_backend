@@ -83,7 +83,7 @@ export const getBills = async (req: AuthRequest, res: Response): Promise<void> =
 
 // 4. Tạo phiếu thu mới & Khóa buổi học (MỚI)
 export const createBill = async (req: AuthRequest, res: Response): Promise<void> => {
-  const { student_id, start_date, end_date, bill_note } = req.body;
+  const { student_id, start_date, end_date, bill_note, unit_price } = req.body;
   const user = req.user;
   try {
     if (user?.role === 'TEACHER') {
@@ -103,30 +103,37 @@ export const createBill = async (req: AuthRequest, res: Response): Promise<void>
     const teacherId = user?.role === 'TEACHER' ? user.id : null;
 
     const calcRes = await pool.query(`
-      SELECT COALESCE(SUM(fee), 0) as calculated_total
-      FROM (
-        SELECT DISTINCT a.class_id, a.attendance_date, c.tuition_fee as fee
-        FROM attendance a
-        JOIN sessions s ON a.class_id = s.class_id AND a.attendance_date = s.session_date
-        JOIN enrollments e ON e.student_id = a.student_id AND e.class_id = a.class_id
-        JOIN classes c ON a.class_id = c.id
-        WHERE a.student_id = $1 
-          AND a.attendance_date >= $2 
-          AND a.attendance_date <= $3
-          AND a.status = 'PRESENT'
-          AND s.is_published = true
-          AND ($4::int IS NULL OR c.teacher_id = $4)
-      ) as valid_sessions
+      SELECT DISTINCT a.class_id, a.attendance_date, c.tuition_fee as fee
+      FROM attendance a
+      JOIN sessions s ON a.class_id = s.class_id AND a.attendance_date = s.session_date
+      JOIN enrollments e ON e.student_id = a.student_id AND e.class_id = a.class_id
+      JOIN classes c ON a.class_id = c.id
+      WHERE a.student_id = $1 
+        AND a.attendance_date >= $2 
+        AND a.attendance_date <= $3
+        AND a.status = 'PRESENT'
+        AND ($4::int IS NULL OR c.teacher_id = $4)
     `, [student_id, start_date, end_date, teacherId]);
-    
-    const total_amount = parseInt(calcRes.rows[0].calculated_total) || 0;
+
+    const presentCount = calcRes.rows.length;
+    let total_amount = 0;
+
+    const customPrice = parseInt(unit_price, 10);
+    if (!isNaN(customPrice) && customPrice >= 0) {
+      total_amount = presentCount * customPrice;
+    } else {
+      total_amount = calcRes.rows.reduce((sum: number, r: any) => sum + Number(r.fee || 0), 0);
+    }
 
     await pool.query(
       `INSERT INTO tuition_bills (student_id, start_date, end_date, total_amount, bill_note, is_paid) VALUES ($1, $2, $3, $4, $5, false)`, 
       [student_id, start_date, end_date, total_amount, bill_note]
     );
-    res.json({ message: 'Tạo phiếu thành công!' });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+    res.json({ message: 'Tạo phiếu thành công!', total_amount });
+  } catch (err: any) { 
+    console.error("Lỗi createBill:", err);
+    res.status(500).json({ error: err.message }); 
+  }
 };
 
 // 5. Xác nhận Đã Thu Tiền & Bật "Tem xanh" (MỚI)
@@ -251,7 +258,7 @@ export const getBillInvoice = async (req: AuthRequest, res: Response): Promise<v
 };
 
 export const previewBill = async (req: AuthRequest, res: Response): Promise<void> => {
-  const { student_id, start_date, end_date } = req.query;
+  const { student_id, start_date, end_date, unit_price } = req.query;
   const user = req.user;
   try {
     if (user?.role === 'TEACHER') {
@@ -270,6 +277,17 @@ export const previewBill = async (req: AuthRequest, res: Response): Promise<void
 
     const teacherId = user?.role === 'TEACHER' ? user.id : null;
 
+    // Get student's default class fee
+    const classRes = await pool.query(`
+      SELECT c.tuition_fee, c.class_name 
+      FROM enrollments e 
+      JOIN classes c ON e.class_id = c.id 
+      WHERE e.student_id = $1 
+      LIMIT 1
+    `, [student_id]);
+    const defaultFee = classRes.rows[0]?.tuition_fee ? Number(classRes.rows[0].tuition_fee) : 0;
+    const className = classRes.rows[0]?.class_name || 'Lớp học';
+
     const calcRes = await pool.query(`
       SELECT DISTINCT c.class_name, a.attendance_date, c.tuition_fee, a.status, s.content,
              COALESCE(a.absent_reason, a.notes) as absent_reason
@@ -285,12 +303,29 @@ export const previewBill = async (req: AuthRequest, res: Response): Promise<void
       ORDER BY a.attendance_date ASC
     `, [student_id, start_date, end_date, teacherId]);
     
-    const total = calcRes.rows.reduce((sum: number, row: any) => sum + Number(row.tuition_fee || 0), 0);
+    const presentCount = calcRes.rows.length;
+    let total = 0;
+    let unitPriceUsed = defaultFee;
+
+    if (unit_price !== undefined && unit_price !== '') {
+      const customPrice = parseInt(String(unit_price), 10);
+      if (!isNaN(customPrice) && customPrice >= 0) {
+        unitPriceUsed = customPrice;
+        total = presentCount * customPrice;
+      } else {
+        total = calcRes.rows.reduce((sum: number, row: any) => sum + Number(row.tuition_fee || 0), 0);
+      }
+    } else {
+      total = calcRes.rows.reduce((sum: number, row: any) => sum + Number(row.tuition_fee || 0), 0);
+    }
+
     res.json({ 
       total_amount: total, 
       sessions: calcRes.rows, 
-      present_count: calcRes.rows.length,
-      tuition_fee: calcRes.rows[0]?.tuition_fee || 0 
+      present_count: presentCount,
+      tuition_fee: unitPriceUsed,
+      default_class_fee: defaultFee,
+      class_name: className
     });
   } catch(err: any) { 
     console.error("Lỗi previewBill:", err);
