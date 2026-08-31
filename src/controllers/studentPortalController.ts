@@ -177,6 +177,37 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
     }
 };
 
+export const getStudentExams = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const studentId = req.user?.student_id;
+        if (!studentId) {
+            res.status(403).json({ message: 'Không có quyền' });
+            return;
+        }
+
+        const query = `
+            SELECT DISTINCT d.id, d.title, d.file_url, d.category, d.uploaded_at as created_at,
+                   COALESCE(c.class_name, 'Luyện thi') as class_name, 
+                   COALESCE(ek.duration_minutes, 50) as duration_minutes, 
+                   COALESCE(ek.allow_view_answers, true) as allow_view_answers
+            FROM documents d
+            LEFT JOIN exam_keys ek ON ek.document_id = d.id
+            LEFT JOIN folders f ON d.folder_id = f.id
+            LEFT JOIN classes c ON (ek.class_id = c.id OR f.class_id = c.id OR (ek.class_id IS NULL AND f.class_id IS NULL AND c.teacher_id = d.teacher_id))
+            JOIN enrollments e ON e.class_id = c.id
+            WHERE e.student_id = $1 
+              AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+              AND (d.category = 'EXAM' OR ek.document_id IS NOT NULL)
+            ORDER BY d.uploaded_at DESC
+        `;
+        const result = await pool.query(query, [studentId]);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("LỖI getStudentExams:", error);
+        res.status(500).json({ message: 'Lỗi server' });
+    }
+};
+
 export const updateEmail = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const studentId = req.user?.student_id;
@@ -187,7 +218,7 @@ export const updateEmail = async (req: AuthRequest, res: Response): Promise<void
         const { email } = req.body;
         
         // Basic validation
-        if (email && !/^[^s@]+@[^s@]+.[^s@]+$/.test(email)) {
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             res.status(400).json({ message: 'Email không hợp lệ' });
             return;
         }

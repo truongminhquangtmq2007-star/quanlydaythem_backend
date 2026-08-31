@@ -5,10 +5,29 @@ import { buildLearningSnapshot, generateStudentPersonalizedInsight } from '../se
 
 export const getLatestInsight = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.student_id;
-        if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền truy cập.' });
+        if (req.user?.role === 'STUDENT') {
+            res.status(403).json({ message: 'Học sinh không có quyền truy cập báo cáo phân tích cá nhân này.' });
             return;
+        }
+
+        const studentId = req.params.studentId || req.query.studentId || req.body.studentId;
+        if (!studentId) {
+            res.status(400).json({ message: 'Thiếu studentId.' });
+            return;
+        }
+
+        if (req.user?.role === 'TEACHER') {
+            const check = await pool.query(
+                `SELECT 1 FROM students s
+                 LEFT JOIN enrollments e ON s.id = e.student_id
+                 LEFT JOIN classes c ON e.class_id = c.id
+                 WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`,
+                [studentId, req.user.id]
+            );
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền xem phân tích của học sinh này" });
+                return;
+            }
         }
 
         const result = await pool.query(`
@@ -38,10 +57,29 @@ export const getLatestInsight = async (req: AuthRequest, res: Response): Promise
 
 export const generateInsight = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.student_id;
-        if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền truy cập.' });
+        if (req.user?.role === 'STUDENT') {
+            res.status(403).json({ message: 'Học sinh không có quyền kích hoạt phân tích cá nhân.' });
             return;
+        }
+
+        const studentId = req.params.studentId || req.body.studentId || req.query.studentId;
+        if (!studentId) {
+            res.status(400).json({ message: 'Thiếu studentId.' });
+            return;
+        }
+
+        if (req.user?.role === 'TEACHER') {
+            const check = await pool.query(
+                `SELECT 1 FROM students s
+                 LEFT JOIN enrollments e ON s.id = e.student_id
+                 LEFT JOIN classes c ON e.class_id = c.id
+                 WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`,
+                [studentId, req.user.id]
+            );
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền phân tích học sinh này" });
+                return;
+            }
         }
 
         // 1. Build Data Snapshot

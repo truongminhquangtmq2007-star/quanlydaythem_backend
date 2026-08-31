@@ -233,6 +233,25 @@ export const resetStudentPassword = async (req: AuthRequest, res: Response): Pro
 export const generateAIEvaluation = async (req: AuthRequest, res: Response): Promise<void> => {
     const { id } = req.params;
     try {
+        if (req.user?.role === 'STUDENT') {
+            res.status(403).json({ message: "Học sinh không có quyền truy cập tính năng phân tích của giáo viên." });
+            return;
+        }
+
+        if (req.user?.role === 'TEACHER') {
+            const check = await pool.query(
+                `SELECT 1 FROM students s
+                 LEFT JOIN enrollments e ON s.id = e.student_id
+                 LEFT JOIN classes c ON e.class_id = c.id
+                 WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`,
+                [id, req.user.id]
+            );
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền phân tích học sinh này" });
+                return;
+            }
+        }
+
         // 1. Get student profile
         const studentRes = await pool.query('SELECT full_name, school_name, is_active FROM students WHERE id = $1', [id]);
         if (studentRes.rows.length === 0) {

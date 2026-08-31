@@ -17,20 +17,26 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
         const { document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content } = req.body;
         
         const documentCheck = await pool.query('SELECT id FROM documents WHERE id = $1', [document_id]);
-        
-        const folderCheck = await pool.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
-        if (folderCheck.rows.length === 0) {
-            res.status(400).json({ message: 'Lớp học này chưa có thư mục Đề thi (EXAM). Vui lòng tạo thư mục trước.' });
-            return;
-        }
-        await pool.query('UPDATE documents SET folder_id = $1 WHERE id = $2', [folderCheck.rows[0].id, document_id]);
-
-
         if (documentCheck.rows.length === 0) {
             res.status(400).json({
                 message: `Tài liệu có ID ${document_id} không tồn tại`
             });
             return;
+        }
+        
+        let folderId: number | null = null;
+        if (class_id) {
+            const folderCheck = await pool.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
+            if (folderCheck.rows.length > 0) {
+                folderId = folderCheck.rows[0].id;
+            } else {
+                const newFolder = await pool.query(
+                    "INSERT INTO folders (name, category, class_id, teacher_id) VALUES ('Đề thi', 'EXAM', $1, $2) RETURNING id",
+                    [class_id, req.user?.id || null]
+                );
+                folderId = newFolder.rows[0].id;
+            }
+            await pool.query('UPDATE documents SET folder_id = $1 WHERE id = $2', [folderId, document_id]);
         }
 
         // Đảm bảo bảng exam_keys có cột context_id
@@ -675,19 +681,52 @@ export const getMySubmissions = async (req: AuthRequest, res: Response): Promise
 export const getExamKey = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { document_id } = req.params;
+        const user = req.user;
+        const contentOnly = req.query.contentOnly === 'true';
         
-        // CẬP NHẬT LỆNH SQL: SELECT THÊM exam_content ĐỂ TRẢ VỀ CHO FRONTEND
         const result = await pool.query(
             `SELECT part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content 
              FROM exam_keys WHERE document_id = $1`,
             [document_id]
         );
         
-        if (result.rows.length > 0) {
-            res.status(200).json(result.rows[0]);
-        } else {
+        if (result.rows.length === 0) {
             res.status(200).json(null);
+            return;
         }
+
+        const data = result.rows[0];
+
+        // Nếu là học sinh:
+        if (user && user.role === 'STUDENT') {
+            if (contentOnly) {
+                // Khi đang làm bài thi: ẩn toàn bộ đáp án đúng & lời giải
+                const strippedContent = data.exam_content ? JSON.parse(JSON.stringify(data.exam_content)) : null;
+                if (strippedContent) {
+                    if (Array.isArray(strippedContent.part1)) {
+                        strippedContent.part1.forEach((q: any) => { delete q.correctAnswer; delete q.explanation; delete q.solution; });
+                    }
+                    if (Array.isArray(strippedContent.part2)) {
+                        strippedContent.part2.forEach((q: any) => { delete q.correctAnswer; delete q.explanation; delete q.solution; });
+                    }
+                    if (Array.isArray(strippedContent.part3)) {
+                        strippedContent.part3.forEach((q: any) => { delete q.correctAnswer; delete q.explanation; delete q.solution; });
+                    }
+                }
+                res.status(200).json({
+                    exam_content: strippedContent,
+                    duration_minutes: data.duration_minutes,
+                    allow_view_answers: data.allow_view_answers
+                });
+                return;
+            } else if (!data.allow_view_answers) {
+                // Giáo viên đã khóa tính năng xem đáp án
+                res.status(403).json({ message: 'Giáo viên chưa mở quyền xem đáp án đề thi này.' });
+                return;
+            }
+        }
+
+        res.status(200).json(data);
     } catch (error) {
         console.error('Lỗi lấy dữ liệu đề thi:', error);
         res.status(500).json({ message: 'Lỗi server' });

@@ -12,7 +12,18 @@ export const explainError = async (req: AuthRequest, res: Response): Promise<voi
             return;
         }
 
-        const targetStudentId = student_id || req.user?.student_id;
+        let targetStudentId = req.user?.student_id;
+        if (req.user?.role === 'STUDENT') {
+            // Student can only query for themselves
+            if (student_id && Number(student_id) !== Number(req.user?.student_id)) {
+                res.status(403).json({ message: 'Không có quyền truy cập dữ liệu của học sinh khác.' });
+                return;
+            }
+            targetStudentId = req.user?.student_id;
+        } else if (student_id) {
+            targetStudentId = student_id;
+        }
+
         const qRes = await pool.query(`SELECT content FROM questions WHERE id = $1`, [question_id]);
         if (qRes.rows.length === 0) {
             res.status(404).json({ message: 'Không tìm thấy câu hỏi' });

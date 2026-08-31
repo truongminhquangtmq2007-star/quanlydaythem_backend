@@ -38,8 +38,8 @@ router.post('/parse-ai-file', verifyToken, isTeacherOrAdmin, uploadMemory.single
 // 4. Lấy danh sách học sinh đã nộp bài của một đề
 router.get('/:document_id/submissions', verifyToken, isTeacherOrAdmin, getExamSubmissions);
 
-// 5. Lấy lại đáp án chuẩn đã lưu
-router.get('/key/:document_id', verifyToken, isTeacherOrAdmin, getExamKey);
+// 5. Lấy lại đáp án chuẩn đã lưu / tải đề thi làm bài
+router.get('/key/:document_id', verifyToken, getExamKey);
 
 
 // ==========================================
