@@ -25,7 +25,8 @@ export const getSessions = async (req: AuthRequest, res: Response): Promise<void
       }
       result = await pool.query(
         `SELECT s.*, 
-                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
+                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count,
+                (SELECT COUNT(*) FROM attendance a WHERE a.class_id = s.class_id AND a.attendance_date = s.session_date) as attendance_count
          FROM sessions s WHERE class_id = $1 ORDER BY session_date ASC`,
         [class_id]
       );
@@ -33,7 +34,8 @@ export const getSessions = async (req: AuthRequest, res: Response): Promise<void
       if (user?.role === 'ADMIN') {
         result = await pool.query(
           `SELECT s.*, c.class_name,
-                  (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
+                  (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count,
+                  (SELECT COUNT(*) FROM attendance a WHERE a.class_id = s.class_id AND a.attendance_date = s.session_date) as attendance_count
            FROM sessions s 
            JOIN classes c ON s.class_id = c.id 
            ORDER BY s.session_date ASC`
@@ -41,7 +43,8 @@ export const getSessions = async (req: AuthRequest, res: Response): Promise<void
       } else {
         result = await pool.query(
           `SELECT s.*, c.class_name,
-                  (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
+                  (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count,
+                  (SELECT COUNT(*) FROM attendance a WHERE a.class_id = s.class_id AND a.attendance_date = s.session_date) as attendance_count
            FROM sessions s 
            JOIN classes c ON s.class_id = c.id 
            WHERE c.teacher_id = $1 ORDER BY s.session_date ASC`,

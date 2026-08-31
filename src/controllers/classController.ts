@@ -240,7 +240,7 @@ export const getSessionAttendance = async (req: AuthRequest, res: Response): Pro
        FROM enrollments e
        JOIN students s ON e.student_id = s.id
        LEFT JOIN attendance a ON a.student_id = e.student_id AND a.class_id = $1 AND a.attendance_date = $2
-       WHERE e.class_id = $1 AND e.status = 'ACTIVE'
+       WHERE e.class_id = $1 AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học' OR e.status NOT IN ('Đã nghỉ', 'Bảo lưu', 'INACTIVE'))
        ORDER BY s.full_name`,
       [class_id, session_date]
     );
@@ -265,8 +265,28 @@ export const addMember = async (req: AuthRequest, res: Response): Promise<void> 
       }
     }
 
+    const checkExist = await pool.query(
+      'SELECT id, status FROM enrollments WHERE class_id = $1 AND student_id = $2',
+      [id, student_id]
+    );
+
+    if (checkExist.rows.length > 0) {
+      const currentStatus = checkExist.rows[0].status;
+      if (currentStatus === 'Đang học' || currentStatus === 'ACTIVE' || !currentStatus) {
+        res.status(400).json({ message: "Học sinh đã có trong lớp này" });
+        return;
+      } else {
+        const updated = await pool.query(
+          "UPDATE enrollments SET status = 'Đang học', enrollment_date = NOW() WHERE id = $1 RETURNING *",
+          [checkExist.rows[0].id]
+        );
+        res.status(200).json({ message: "Đã thêm lại học sinh vào lớp", member: updated.rows[0] });
+        return;
+      }
+    }
+
     const result = await pool.query(
-      `INSERT INTO enrollments (class_id, student_id) VALUES ($1, $2) RETURNING *`,
+      `INSERT INTO enrollments (class_id, student_id, status, enrollment_date) VALUES ($1, $2, 'Đang học', NOW()) RETURNING *`,
       [id, student_id]
     );
     res.status(201).json({ message: "Đã thêm học sinh vào lớp", member: result.rows[0] });

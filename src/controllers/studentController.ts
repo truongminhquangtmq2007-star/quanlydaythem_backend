@@ -17,11 +17,12 @@ export interface AuthRequest extends Request {
 export const searchGlobalStudents = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { q } = req.query;
-        if (!q || typeof q !== 'string' || q.length < 2) {
+        if (!q || typeof q !== 'string' || q.trim().length === 0) {
             res.status(200).json([]);
             return;
         }
         
+        const trimmed = q.trim();
         const query = `
             SELECT id, full_name, phone_number, school_name, email
             FROM students 
@@ -30,7 +31,7 @@ export const searchGlobalStudents = async (req: AuthRequest, res: Response): Pro
             ORDER BY full_name ASC LIMIT 20
         `;
         
-        const result = await pool.query(query, [`%${q}%`]);
+        const result = await pool.query(query, [`%${trimmed}%`]);
         res.status(200).json(result.rows);
     } catch (error) {
         console.error(error);

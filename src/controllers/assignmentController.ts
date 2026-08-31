@@ -45,7 +45,9 @@ export const getClassAssignments = async (req: AuthRequest, res: Response): Prom
     }
 
     const result = await pool.query(
-      `SELECT a.*, d.category, f.name as folder_name 
+      `SELECT a.id, a.class_id, a.document_id, COALESCE(a.title, d.title, 'Tài liệu') as title, 
+              d.title as doc_title, d.file_url, d.category, a.due_at, a.description as session_info, 
+              a.created_at, f.name as folder_name 
        FROM assignments a
        LEFT JOIN documents d ON a.document_id = d.id
        LEFT JOIN folders f ON d.folder_id = f.id

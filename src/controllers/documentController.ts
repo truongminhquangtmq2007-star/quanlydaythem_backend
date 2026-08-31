@@ -18,7 +18,7 @@ export const createFolder = async (req: AuthRequest, res: Response): Promise<voi
 
     if (parent_id && user?.role === 'TEACHER') {
       const parentCheck = await pool.query(
-        'SELECT id FROM folders WHERE id = $1 AND (teacher_id = $2 OR teacher_id IS NULL)',
+        'SELECT id FROM folders WHERE id = $1 AND teacher_id = $2',
         [parent_id, user.id]
       );
       if (parentCheck.rows.length === 0) {
@@ -98,7 +98,7 @@ export const getFolderContents = async (req: AuthRequest, res: Response): Promis
     
     if (!isRoot && user?.role === 'TEACHER') {
       const checkFolder = await pool.query(
-        'SELECT id FROM folders WHERE id = $1 AND (teacher_id = $2 OR teacher_id IS NULL)',
+        'SELECT id FROM folders WHERE id = $1 AND teacher_id = $2',
         [folderId, user.id]
       );
       if (checkFolder.rows.length === 0) {
@@ -121,14 +121,14 @@ export const getFolderContents = async (req: AuthRequest, res: Response): Promis
         params = [folderId];
       }
     } else {
-      // TEACHER: isolate by teacher_id
+      // TEACHER: strictly isolate by teacher_id
       if (isRoot) {
-        foldersQuery = 'SELECT * FROM folders WHERE parent_id IS NULL AND (teacher_id = $1 OR teacher_id IS NULL) ORDER BY name';
-        docsQuery = 'SELECT * FROM documents WHERE folder_id IS NULL AND (teacher_id = $1 OR teacher_id IS NULL) ORDER BY title';
+        foldersQuery = 'SELECT * FROM folders WHERE parent_id IS NULL AND teacher_id = $1 ORDER BY name';
+        docsQuery = 'SELECT * FROM documents WHERE folder_id IS NULL AND teacher_id = $1 ORDER BY title';
         params = [user?.id];
       } else {
-        foldersQuery = 'SELECT * FROM folders WHERE parent_id = $1 AND (teacher_id = $2 OR teacher_id IS NULL) ORDER BY name';
-        docsQuery = 'SELECT * FROM documents WHERE folder_id = $1 AND (teacher_id = $2 OR teacher_id IS NULL) ORDER BY title';
+        foldersQuery = 'SELECT * FROM folders WHERE parent_id = $1 AND teacher_id = $2 ORDER BY name';
+        docsQuery = 'SELECT * FROM documents WHERE folder_id = $1 AND teacher_id = $2 ORDER BY title';
         params = [folderId, user?.id];
       }
     }
@@ -155,7 +155,7 @@ export const addDocument = async (req: AuthRequest, res: Response): Promise<void
 
     if (folder_id && user?.role === 'TEACHER') {
       const folderCheck = await pool.query(
-        'SELECT id FROM folders WHERE id = $1 AND (teacher_id = $2 OR teacher_id IS NULL)',
+        'SELECT id FROM folders WHERE id = $1 AND teacher_id = $2',
         [folder_id, user.id]
       );
       if (folderCheck.rows.length === 0) {
@@ -183,7 +183,7 @@ export const updateDocument = async (req: AuthRequest, res: Response): Promise<v
 
     if (user?.role === 'TEACHER') {
       const docCheck = await pool.query(
-        'SELECT id FROM documents WHERE id = $1 AND (teacher_id = $2 OR teacher_id IS NULL)',
+        'SELECT id FROM documents WHERE id = $1 AND teacher_id = $2',
         [id, user.id]
       );
       if (docCheck.rows.length === 0) {
@@ -193,7 +193,7 @@ export const updateDocument = async (req: AuthRequest, res: Response): Promise<v
 
       if (folder_id) {
         const targetFolderCheck = await pool.query(
-          'SELECT id FROM folders WHERE id = $1 AND (teacher_id = $2 OR teacher_id IS NULL)',
+          'SELECT id FROM folders WHERE id = $1 AND teacher_id = $2',
           [folder_id, user.id]
         );
         if (targetFolderCheck.rows.length === 0) {
@@ -227,6 +227,8 @@ export const deleteDocument = async (req: AuthRequest, res: Response): Promise<v
       }
     }
 
+    // Delete assignments referencing this document first to avoid foreign key issues
+    await pool.query('DELETE FROM assignments WHERE document_id = $1', [id]);
     await pool.query('DELETE FROM documents WHERE id = $1', [id]);
     res.status(200).json({ message: 'Đã xóa tài liệu' });
   } catch (error) {
@@ -243,7 +245,7 @@ export const getAllDocuments = async (req: AuthRequest, res: Response): Promise<
       result = await pool.query('SELECT * FROM documents ORDER BY uploaded_at DESC');
     } else {
       result = await pool.query(
-        'SELECT * FROM documents WHERE teacher_id = $1 OR teacher_id IS NULL ORDER BY uploaded_at DESC',
+        'SELECT * FROM documents WHERE teacher_id = $1 ORDER BY uploaded_at DESC',
         [user?.id]
       );
     }
@@ -262,8 +264,8 @@ export const getDrive = async (req: AuthRequest, res: Response): Promise<void> =
     let paramIdx = 1;
 
     if (req.user && req.user.role === 'TEACHER') {
-      foldersQuery += ' LEFT JOIN classes c ON f.class_id = c.id WHERE (f.teacher_id = $' + paramIdx + ' OR c.teacher_id = $' + paramIdx + ' OR f.teacher_id IS NULL) ';
-      docsQuery += ' LEFT JOIN folders fd ON d.folder_id = fd.id LEFT JOIN classes c2 ON fd.class_id = c2.id WHERE (d.teacher_id = $' + paramIdx + ' OR c2.teacher_id = $' + paramIdx + ' OR d.teacher_id IS NULL) ';
+      foldersQuery += ' LEFT JOIN classes c ON f.class_id = c.id WHERE (f.teacher_id = $' + paramIdx + ' OR c.teacher_id = $' + paramIdx + ') ';
+      docsQuery += ' LEFT JOIN folders fd ON d.folder_id = fd.id LEFT JOIN classes c2 ON fd.class_id = c2.id WHERE (d.teacher_id = $' + paramIdx + ' OR c2.teacher_id = $' + paramIdx + ') ';
       params.push(req.user.id);
       paramIdx++;
     } else {
