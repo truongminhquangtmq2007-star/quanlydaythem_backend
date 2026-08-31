@@ -330,10 +330,19 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
 
     // Đã gỡ bỏ logic tự động sinh điểm danh PRESENT (Hotfix 3.2)
     
+  await client.query('COMMIT');
+
+    res.status(201).json({
+      message: "Tạo buổi học thành công",
+      session
+    });
+
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error(error);
-    res.status(500).json({ message: "Lỗi server khi tạo buổi học" });
+    console.error('Lỗi tạo buổi học:', error);
+    res.status(500).json({
+      message: "Lỗi server khi tạo buổi học"
+    });
   } finally {
     client.release();
   }
