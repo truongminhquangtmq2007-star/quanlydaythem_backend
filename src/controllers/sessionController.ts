@@ -307,14 +307,41 @@ export const syncCalendar = async (req: AuthRequest, res: Response): Promise<voi
     userOAuth2Client.setCredentials(parsedTokens);
     const calendar = google.calendar({ version: 'v3', auth: userOAuth2Client });
 
-    // Format ISO dates cleanly
-    const dateStr = session.session_date instanceof Date 
-      ? session.session_date.toISOString().split('T')[0] 
-      : String(session.session_date).split('T')[0];
-    const startT = (session.start_time ? String(session.start_time).substring(0, 5) : '18:00') + ':00';
-    const endT = (session.end_time ? String(session.end_time).substring(0, 5) : '19:30') + ':00';
+    // Format local ISO date cleanly without UTC shift
+    let dateStr = '';
+    if (session.session_date instanceof Date) {
+      const d = session.session_date;
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      dateStr = `${yyyy}-${mm}-${dd}`;
+    } else {
+      dateStr = String(session.session_date).substring(0, 10);
+    }
 
-    // Get active students' emails
+    const rawStart = session.start_time ? String(session.start_time).trim() : '18:00';
+    const startParts = rawStart.split(':');
+    const startHour = parseInt(startParts[0] || '18', 10);
+    const startMin = parseInt(startParts[1] || '0', 10);
+    const startT = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00`;
+
+    // Calculate end time if not provided: default +90 minutes
+    let endT = '';
+    if (session.end_time) {
+      const rawEnd = String(session.end_time).trim();
+      const endParts = rawEnd.split(':');
+      const endHour = parseInt(endParts[0] || '19', 10);
+      const endMin = parseInt(endParts[1] || '30', 10);
+      endT = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`;
+    } else {
+      const totalStartMin = startHour * 60 + startMin;
+      const totalEndMin = totalStartMin + 90;
+      const endHour = Math.floor(totalEndMin / 60) % 24;
+      const endMin = totalEndMin % 60;
+      endT = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`;
+    }
+
+    // Get active students' emails strictly for this class
     const emailsRes = await pool.query(
       `SELECT s.email FROM students s
        JOIN enrollments cm ON s.id = cm.student_id
@@ -326,6 +353,7 @@ export const syncCalendar = async (req: AuthRequest, res: Response): Promise<voi
     );
     const attendees = emailsRes.rows.map(r => ({ email: r.email }));
     const summaryText = session.class_name ? `[${session.class_name}] ${session.content || 'Lịch học'}` : (session.content || 'Lịch học');
+    const descriptionText = `Lớp: ${session.class_name || 'Lớp học'}\nNội dung: ${session.content || 'Buổi học theo chương trình'}\nThời gian: ${startT} - ${endT}`;
 
     if (session.google_event_id) {
       // Update existing event
@@ -334,6 +362,7 @@ export const syncCalendar = async (req: AuthRequest, res: Response): Promise<voi
         eventId: session.google_event_id,
         requestBody: {
           summary: summaryText,
+          description: descriptionText,
           start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
           end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
           attendees: attendees.length > 0 ? attendees : undefined
@@ -346,17 +375,21 @@ export const syncCalendar = async (req: AuthRequest, res: Response): Promise<voi
         calendarId: 'primary',
         requestBody: {
           summary: summaryText,
-          description: session.content || '',
+          description: descriptionText,
           start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
           end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
           attendees: attendees.length > 0 ? attendees : undefined
         }
       });
       await pool.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [event.data.id, session.id]);
-      res.status(200).json({ message: 'Tạo mới và đồng bộ lịch Google thành công' });
+      res.status(200).json({ message: 'Tạo mới và đồng bộ lịch Google thành công', eventId: event.data.id });
     }
   } catch (error: any) {
-    console.error("Lỗi đồng bộ lại Google Calendar:", error);
+    console.error("Lỗi đồng bộ Google Calendar:", error);
+    if (error?.message?.includes('invalid_grant') || error?.code === 401) {
+      res.status(401).json({ message: 'Tài khoản Google Calendar cần được kết nối lại do phiên đăng nhập đã hết hạn. Vui lòng bấm "Tích hợp Google Calendar" để cấp lại quyền.' });
+      return;
+    }
     res.status(500).json({ message: error?.message || 'Lỗi khi đồng bộ Google Calendar' });
   }
 };
