@@ -15,8 +15,8 @@ export const createFolder = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
     const result = await pool.query(
-      'INSERT INTO folders (name, parent_id, category, created_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
-      [name, parent_id || null, category]
+      'INSERT INTO folders (name, parent_id, category, teacher_id, created_at) VALUES ($1, $2, $3, $4, NOW()) RETURNING *',
+      [name, parent_id || null, category, req.user?.id || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {

@@ -105,10 +105,9 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
     const student = result.rows[0];
 
     try {
-      const userEmail = email || `${username.toLowerCase()}@student.local`;
       await pool.query(
-        `INSERT INTO users (username, email, password_hash, role, full_name, student_id) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [username, userEmail, passwordHash, 'STUDENT', full_name, student.id]
+        `INSERT INTO users (username, password_hash, role, full_name, student_id) VALUES ($1, $2, $3, $4, $5)`,
+        [username, passwordHash, 'STUDENT', full_name, student.id]
       );
     } catch (e) {
       console.log('Không thể tạo user tự động cho học sinh:', e);
