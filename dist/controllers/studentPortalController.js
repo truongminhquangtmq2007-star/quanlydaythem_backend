@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateEmail = exports.getDocuments = exports.getSchedule = exports.getDashboard = void 0;
+exports.updateEmail = exports.getStudentExams = exports.getDocuments = exports.getSchedule = exports.getDashboard = void 0;
 const db_1 = __importDefault(require("../db"));
 const getDashboard = async (req, res) => {
     try {
@@ -88,21 +88,23 @@ const getDashboard = async (req, res) => {
         catch (e) {
             console.error(e);
         }
-        // Đề thi/Bài tập
+        // Đề thi / Bài tập / Tài liệu được giao
         let assignments = [];
         try {
-            const docsRes = await db_1.default.query(`SELECT d.id, d.title, f.category AS type, c.class_name
-  FROM documents d
-  JOIN folders f ON d.folder_id = f.id
-  JOIN classes c ON f.class_id = c.id
-  JOIN enrollments e ON e.class_id = c.id
-  WHERE e.student_id = $1
-                ORDER BY d.uploaded_at DESC
-                LIMIT 5`, [studentId]);
+            const docsRes = await db_1.default.query(`SELECT a.id as assignment_id, d.id as document_id, COALESCE(a.title, d.title) as title, 
+                        d.file_url, d.category as type, c.class_name, a.due_at, a.description as session_info,
+                        a.created_at
+                 FROM assignments a
+                 JOIN documents d ON a.document_id = d.id
+                 JOIN classes c ON a.class_id = c.id
+                 JOIN enrollments e ON e.class_id = c.id
+                 WHERE e.student_id = $1 AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+                 ORDER BY a.created_at DESC
+                 LIMIT 5`, [studentId]);
             assignments = docsRes.rows;
         }
         catch (e) {
-            console.error(e);
+            console.error("Lỗi lấy assignments:", e);
         }
         res.status(200).json({
             profile,
@@ -125,7 +127,6 @@ const getSchedule = async (req, res) => {
             res.status(403).json({ message: 'Không có quyền' });
             return;
         }
-        // SCHEMA THẬT: classes dùng "class_name" không phải "name". Không có "subject".
         const query = `
             SELECT s.id, s.session_date, s.start_time, c.class_name
             FROM sessions s
@@ -151,15 +152,15 @@ const getDocuments = async (req, res) => {
             res.status(403).json({ message: 'Không có quyền' });
             return;
         }
-        // SCHEMA THẬT: classes dùng "class_name". documents dùng "uploaded_at", "category".
         const query = `
-            SELECT d.id, d.title, f.category AS type, d.file_url, d.uploaded_at AS created_at, c.class_name, NULL AS due_at
-  FROM documents d
-  JOIN folders f ON d.folder_id = f.id
-  JOIN classes c ON f.class_id = c.id
-  JOIN enrollments e ON e.class_id = c.id
-  WHERE e.student_id = $1
-            ORDER BY d.uploaded_at DESC
+            SELECT a.id, COALESCE(a.title, d.title) as title, d.category AS type, d.file_url,
+                   a.created_at, c.class_name, a.due_at, a.description as session_info
+            FROM assignments a
+            JOIN documents d ON a.document_id = d.id
+            JOIN classes c ON a.class_id = c.id
+            JOIN enrollments e ON e.class_id = c.id
+            WHERE e.student_id = $1 AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+            ORDER BY a.created_at DESC
             LIMIT 20
         `;
         const result = await db_1.default.query(query, [studentId]);
@@ -171,6 +172,37 @@ const getDocuments = async (req, res) => {
     }
 };
 exports.getDocuments = getDocuments;
+const getStudentExams = async (req, res) => {
+    try {
+        const studentId = req.user?.student_id;
+        if (!studentId) {
+            res.status(403).json({ message: 'Không có quyền' });
+            return;
+        }
+        const query = `
+            SELECT DISTINCT d.id, d.title, d.file_url, d.category, d.uploaded_at as created_at,
+                   COALESCE(c.class_name, 'Luyện thi') as class_name, 
+                   COALESCE(ek.duration_minutes, 50) as duration_minutes, 
+                   COALESCE(ek.allow_view_answers, true) as allow_view_answers
+            FROM documents d
+            LEFT JOIN exam_keys ek ON ek.document_id = d.id
+            LEFT JOIN folders f ON d.folder_id = f.id
+            LEFT JOIN classes c ON (d.class_id = c.id OR ek.class_id = c.id OR f.class_id = c.id OR (d.class_id IS NULL AND ek.class_id IS NULL AND f.class_id IS NULL AND c.teacher_id = d.teacher_id))
+            JOIN enrollments e ON e.class_id = c.id
+            WHERE e.student_id = $1 
+              AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+              AND (d.category = 'EXAM' OR ek.document_id IS NOT NULL)
+            ORDER BY d.uploaded_at DESC
+        `;
+        const result = await db_1.default.query(query, [studentId]);
+        res.status(200).json(result.rows);
+    }
+    catch (error) {
+        console.error("LỖI getStudentExams:", error);
+        res.status(500).json({ message: 'Lỗi server' });
+    }
+};
+exports.getStudentExams = getStudentExams;
 const updateEmail = async (req, res) => {
     try {
         const studentId = req.user?.student_id;
@@ -180,7 +212,7 @@ const updateEmail = async (req, res) => {
         }
         const { email } = req.body;
         // Basic validation
-        if (email && !/^[^s@]+@[^s@]+.[^s@]+$/.test(email)) {
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             res.status(400).json({ message: 'Email không hợp lệ' });
             return;
         }

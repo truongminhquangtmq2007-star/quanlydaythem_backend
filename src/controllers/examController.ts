@@ -12,38 +12,42 @@ import {
 // 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀ NỘI DUNG ĐỀ VÀO DATABASE
 // ========================================================
 export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<void> => {
+    const client = await pool.connect();
     try {
-        // NHẬN THÊM BIẾN exam_content TỪ FRONTEND
         const { document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content } = req.body;
         
-        const documentCheck = await pool.query('SELECT id FROM documents WHERE id = $1', [document_id]);
+        const documentCheck = await client.query('SELECT id, teacher_id FROM documents WHERE id = $1', [document_id]);
         if (documentCheck.rows.length === 0) {
+            client.release();
             res.status(400).json({
                 message: `Tài liệu có ID ${document_id} không tồn tại`
             });
             return;
         }
+
+        await client.query('BEGIN');
         
         let folderId: number | null = null;
         if (class_id) {
-            const folderCheck = await pool.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
+            const folderCheck = await client.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
             if (folderCheck.rows.length > 0) {
                 folderId = folderCheck.rows[0].id;
             } else {
-                const newFolder = await pool.query(
+                const newFolder = await client.query(
                     "INSERT INTO folders (name, category, class_id, teacher_id) VALUES ('Đề thi', 'EXAM', $1, $2) RETURNING id",
                     [class_id, req.user?.id || null]
                 );
                 folderId = newFolder.rows[0].id;
             }
-            await pool.query('UPDATE documents SET folder_id = $1 WHERE id = $2', [folderId, document_id]);
-        }
-
-        // Đảm bảo bảng exam_keys có cột context_id
-        try {
-            
-        } catch (colErr) {
-            // Bỏ qua nếu cột đã tồn tại hoặc không thể thêm
+            await client.query(
+                `UPDATE documents SET folder_id = $1, class_id = $2, category = 'EXAM' WHERE id = $3`, 
+                [folderId, class_id, document_id]
+            );
+        } else {
+            await client.query(
+                `UPDATE documents SET category = 'EXAM' WHERE id = $1`, 
+                [document_id]
+            );
         }
 
         let primaryContextId: number | null = null;
@@ -54,8 +58,7 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
         const sharedList = Array.isArray(rawShared) ? rawShared : rawShared ? [rawShared] : [];
 
         if (sharedList.length > 0) {
-            // Xóa ngữ cảnh cũ của đề thi này nếu có
-            await pool.query('DELETE FROM question_contexts WHERE document_id = $1', [document_id]);
+            await client.query('DELETE FROM question_contexts WHERE document_id = $1', [document_id]);
 
             for (const item of sharedList) {
                 const content = item.content || item.text || (typeof item === 'string' ? item : '');
@@ -63,8 +66,7 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
                 const part = item.part || 'part1';
                 const questionIds = item.questionIds || item.question_ids || [];
 
-                // Lưu vào bảng question_contexts trước để lấy ID
-                const insertContextRes = await pool.query(
+                const insertContextRes = await client.query(
                     `INSERT INTO question_contexts (document_id, content, image_url, part, question_ids)
                      VALUES ($1, $2, $3, $4, $5)
                      RETURNING id`,
@@ -76,11 +78,9 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
                     primaryContextId = contextId;
                 }
 
-                // Gán context_id vào đối tượng context
                 item.id = contextId;
                 item.context_id = contextId;
 
-                // Gán context_id vào các câu hỏi con tương ứng trong exam_content
                 if (finalExamContent) {
                     const targetPart = (part === 'part2' ? finalExamContent.part2 : part === 'part3' ? finalExamContent.part3 : finalExamContent.part1) || [];
                     targetPart.forEach((q: any) => {
@@ -97,7 +97,7 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
             }
         }
 
-        const currentData = await pool.query(
+        const currentData = await client.query(
             `SELECT 
                 part1_key,
                 part2_key,
@@ -126,11 +126,12 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
         const p3 = part3_key && Object.keys(part3_key).length > 0 ? part3_key : old.part3_key;
 
         // Lưu vào bảng exam_keys kèm context_id tương ứng
-        await pool.query(
+        await client.query(
             `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
              ON CONFLICT (document_id) 
              DO UPDATE SET 
+                class_id = COALESCE($2, exam_keys.class_id),
                 part1_key = $3, part2_key = $4, part3_key = $5,
                 allow_view_answers = $6, duration_minutes = $7, exam_content = $8
              RETURNING *`,
@@ -140,19 +141,44 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
                 p1,
                 p2,
                 p3,
-                allow_view_answers,
-                duration_minutes,
+                allow_view_answers !== undefined ? allow_view_answers : true,
+                duration_minutes || 50,
                 resolvedExamContent
             ]
         );
 
+        // ĐỒNG BỘ VÀO BẢNG questions
+        if (resolvedExamContent) {
+            await client.query(`DELETE FROM questions WHERE quiz_id = $1`, [document_id]);
+            const allQuestions = [
+                ...(resolvedExamContent.part1 || []).map((q: any) => ({ ...q, part_number: 1, question_type: 'MCQ' })),
+                ...(resolvedExamContent.part2 || []).map((q: any) => ({ ...q, part_number: 2, question_type: 'TRUE_FALSE' })),
+                ...(resolvedExamContent.part3 || []).map((q: any) => ({ ...q, part_number: 3, question_type: 'SHORT_ANSWER' }))
+            ];
+            
+            for (const q of allQuestions) {
+                await client.query(
+                    `INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) 
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [document_id, q.part_number, q.question_type, JSON.stringify(q), JSON.stringify(q.correctAnswer)]
+                );
+            }
+        }
+
+        await client.query('COMMIT');
+        client.release();
+
         res.status(200).json({ 
+            success: true,
             message: 'Lưu đề thi và đáp án thành công!',
+            document_id,
             context_id: primaryContextId
         });
     } catch (error) {
+        await client.query('ROLLBACK');
+        client.release();
         console.error('LỖI LƯU ĐÁP ÁN VÀ NỘI DUNG ĐỀ:', error);
-        res.status(500).json({ message: 'Lỗi server', detail: (error as Error).message });
+        res.status(500).json({ message: 'Lỗi server khi lưu đáp án', detail: (error as Error).message });
     }
 };
 
@@ -933,16 +959,19 @@ export const getAllExams = async (req: AuthRequest, res: Response): Promise<void
 // ========================================================
 
 export const publishExam = async (req: AuthRequest, res: Response): Promise<void> => {
+    const client = await pool.connect();
     try {
         let { document_id, title, grade, subject, duration_minutes, class_id, exam_content } = req.body;
         
+        await client.query('BEGIN');
+
         let folderId: number | null = null;
         if (class_id) {
-            const folderCheck = await pool.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
+            const folderCheck = await client.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
             if (folderCheck.rows.length > 0) {
                 folderId = folderCheck.rows[0].id;
             } else {
-                const newFolder = await pool.query(
+                const newFolder = await client.query(
                     "INSERT INTO folders (name, category, class_id, teacher_id) VALUES ('Đề thi', 'EXAM', $1, $2) RETURNING id",
                     [class_id, req.user?.id || null]
                 );
@@ -952,17 +981,17 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
 
         // 1. Tạo hoặc cập nhật Document
         let actual_document_id = parseInt(String(document_id), 10);
-          if (!actual_document_id || actual_document_id === 0) {
-            const docRes = await pool.query(
-                `INSERT INTO documents (title, category, folder_id, teacher_id) 
-                 VALUES ($1, 'EXAM', $2, $3) RETURNING id`,
-                [title || 'Đề thi AI', folderId, req.user?.id || null]
+        if (!actual_document_id || actual_document_id === 0) {
+            const docRes = await client.query(
+                `INSERT INTO documents (title, category, folder_id, class_id, teacher_id) 
+                 VALUES ($1, 'EXAM', $2, $3, $4) RETURNING id`,
+                [title || 'Đề thi AI', folderId, class_id || null, req.user?.id || null]
             );
             actual_document_id = docRes.rows[0].id;
         } else {
-            await pool.query(
-                `UPDATE documents SET title = $1, folder_id = $2 WHERE id = $3`,
-                [title, folderId, actual_document_id]
+            await client.query(
+                `UPDATE documents SET title = $1, folder_id = $2, class_id = $3, category = 'EXAM' WHERE id = $4`,
+                [title, folderId, class_id || null, actual_document_id]
             );
         }
 
@@ -972,18 +1001,19 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
             const part2_key = exam_content.part2?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
             const part3_key = exam_content.part3?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
             
-            await pool.query(
+            await client.query(
                 `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
                  VALUES ($1, $2, $3, $4, $5, true, $6, $7) 
                  ON CONFLICT (document_id) 
                  DO UPDATE SET 
+                    class_id = COALESCE($2, exam_keys.class_id),
                     part1_key = $3, part2_key = $4, part3_key = $5,
                     duration_minutes = $6, exam_content = $7`,
-                [actual_document_id, class_id, part1_key, part2_key, part3_key, duration_minutes, exam_content]
+                [actual_document_id, class_id, part1_key, part2_key, part3_key, duration_minutes || 50, exam_content]
             );
 
             // 3. Xóa các câu hỏi cũ (nếu có)
-            await pool.query(`DELETE FROM questions WHERE quiz_id = $1`, [actual_document_id]);
+            await client.query(`DELETE FROM questions WHERE quiz_id = $1`, [actual_document_id]);
 
             // 4. Cập nhật lại bảng questions thực tế
             const allQuestions = [
@@ -992,20 +1022,23 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
                 ...(exam_content.part3 || []).map((q: any) => ({ ...q, part_number: 3, question_type: 'SHORT_ANSWER' }))
             ];
             
-            if (allQuestions.length > 0) {
-                await Promise.all(allQuestions.map(q => 
-                    pool.query(
-                        `INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) VALUES ($1, $2, $3, $4, $5)`,
-                        [actual_document_id, q.part_number, q.question_type, JSON.stringify(q), JSON.stringify(q.correctAnswer)]
-                    )
-                ));
+            for (const q of allQuestions) {
+                await client.query(
+                    `INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) VALUES ($1, $2, $3, $4, $5)`,
+                    [actual_document_id, q.part_number, q.question_type, JSON.stringify(q), JSON.stringify(q.correctAnswer)]
+                );
             }
         }
 
-        res.status(200).json({ message: 'Xuất bản đề thi thành công!', document_id: actual_document_id });
+        await client.query('COMMIT');
+        client.release();
+
+        res.status(200).json({ success: true, message: 'Xuất bản đề thi thành công!', document_id: actual_document_id });
     } catch (error) {
+        await client.query('ROLLBACK');
+        client.release();
         console.error('Lỗi publish đề:', error);
-        res.status(500).json({ message: 'Lỗi xuất bản đề thi' });
+        res.status(500).json({ message: 'Lỗi xuất bản đề thi', detail: (error as Error).message });
     }
 };
 

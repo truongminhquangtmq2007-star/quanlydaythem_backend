@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.askAITutor = exports.publishExam = exports.getAllExams = exports.parseExamFromFile = exports.createExamFromText = exports.getExamKey = exports.getMySubmissions = exports.getExamSubmissions = exports.submitExam = exports.saveDraftExam = exports.getDraftExam = exports.saveAnswerKey = void 0;
+const cloudinary_1 = require("cloudinary");
 const geminiService_1 = require("../services/geminiService");
 const db_1 = __importDefault(require("../db"));
 // 👇 Nhập hàm gọi Gemini từ service bạn vừa tạo
@@ -12,27 +13,32 @@ const geminiService_2 = require("../services/geminiService");
 // 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀ NỘI DUNG ĐỀ VÀO DATABASE
 // ========================================================
 const saveAnswerKey = async (req, res) => {
+    const client = await db_1.default.connect();
     try {
-        // NHẬN THÊM BIẾN exam_content TỪ FRONTEND
         const { document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content } = req.body;
-        const documentCheck = await db_1.default.query('SELECT id FROM documents WHERE id = $1', [document_id]);
-        const folderCheck = await db_1.default.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
-        if (folderCheck.rows.length === 0) {
-            res.status(400).json({ message: 'Lớp học này chưa có thư mục Đề thi (EXAM). Vui lòng tạo thư mục trước.' });
-            return;
-        }
-        await db_1.default.query('UPDATE documents SET folder_id = $1 WHERE id = $2', [folderCheck.rows[0].id, document_id]);
+        const documentCheck = await client.query('SELECT id, teacher_id FROM documents WHERE id = $1', [document_id]);
         if (documentCheck.rows.length === 0) {
+            client.release();
             res.status(400).json({
                 message: `Tài liệu có ID ${document_id} không tồn tại`
             });
             return;
         }
-        // Đảm bảo bảng exam_keys có cột context_id
-        try {
+        await client.query('BEGIN');
+        let folderId = null;
+        if (class_id) {
+            const folderCheck = await client.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
+            if (folderCheck.rows.length > 0) {
+                folderId = folderCheck.rows[0].id;
+            }
+            else {
+                const newFolder = await client.query("INSERT INTO folders (name, category, class_id, teacher_id) VALUES ('Đề thi', 'EXAM', $1, $2) RETURNING id", [class_id, req.user?.id || null]);
+                folderId = newFolder.rows[0].id;
+            }
+            await client.query(`UPDATE documents SET folder_id = $1, class_id = $2, category = 'EXAM' WHERE id = $3`, [folderId, class_id, document_id]);
         }
-        catch (colErr) {
-            // Bỏ qua nếu cột đã tồn tại hoặc không thể thêm
+        else {
+            await client.query(`UPDATE documents SET category = 'EXAM' WHERE id = $1`, [document_id]);
         }
         let primaryContextId = null;
         let finalExamContent = exam_content;
@@ -40,25 +46,21 @@ const saveAnswerKey = async (req, res) => {
         const rawShared = exam_content?.shared_context || exam_content?.sharedContexts || req.body.shared_context;
         const sharedList = Array.isArray(rawShared) ? rawShared : rawShared ? [rawShared] : [];
         if (sharedList.length > 0) {
-            // Xóa ngữ cảnh cũ của đề thi này nếu có
-            await db_1.default.query('DELETE FROM question_contexts WHERE document_id = $1', [document_id]);
+            await client.query('DELETE FROM question_contexts WHERE document_id = $1', [document_id]);
             for (const item of sharedList) {
                 const content = item.content || item.text || (typeof item === 'string' ? item : '');
                 const imageUrl = item.image_url || null;
                 const part = item.part || 'part1';
                 const questionIds = item.questionIds || item.question_ids || [];
-                // Lưu vào bảng question_contexts trước để lấy ID
-                const insertContextRes = await db_1.default.query(`INSERT INTO question_contexts (document_id, content, image_url, part, question_ids)
+                const insertContextRes = await client.query(`INSERT INTO question_contexts (document_id, content, image_url, part, question_ids)
                      VALUES ($1, $2, $3, $4, $5)
                      RETURNING id`, [document_id, content, imageUrl, part, JSON.stringify(questionIds)]);
                 const contextId = insertContextRes.rows[0]?.id;
                 if (!primaryContextId && contextId) {
                     primaryContextId = contextId;
                 }
-                // Gán context_id vào đối tượng context
                 item.id = contextId;
                 item.context_id = contextId;
-                // Gán context_id vào các câu hỏi con tương ứng trong exam_content
                 if (finalExamContent) {
                     const targetPart = (part === 'part2' ? finalExamContent.part2 : part === 'part3' ? finalExamContent.part3 : finalExamContent.part1) || [];
                     targetPart.forEach((q) => {
@@ -73,7 +75,7 @@ const saveAnswerKey = async (req, res) => {
                 finalExamContent.sharedContexts = sharedList;
             }
         }
-        const currentData = await db_1.default.query(`SELECT 
+        const currentData = await client.query(`SELECT 
                 part1_key,
                 part2_key,
                 part3_key,
@@ -95,10 +97,11 @@ const saveAnswerKey = async (req, res) => {
         const p2 = part2_key && Object.keys(part2_key).length > 0 ? part2_key : old.part2_key;
         const p3 = part3_key && Object.keys(part3_key).length > 0 ? part3_key : old.part3_key;
         // Lưu vào bảng exam_keys kèm context_id tương ứng
-        await db_1.default.query(`INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
+        await client.query(`INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
              ON CONFLICT (document_id) 
              DO UPDATE SET 
+                class_id = COALESCE($2, exam_keys.class_id),
                 part1_key = $3, part2_key = $4, part3_key = $5,
                 allow_view_answers = $6, duration_minutes = $7, exam_content = $8
              RETURNING *`, [
@@ -107,18 +110,37 @@ const saveAnswerKey = async (req, res) => {
             p1,
             p2,
             p3,
-            allow_view_answers,
-            duration_minutes,
+            allow_view_answers !== undefined ? allow_view_answers : true,
+            duration_minutes || 50,
             resolvedExamContent
         ]);
+        // ĐỒNG BỘ VÀO BẢNG questions
+        if (resolvedExamContent) {
+            await client.query(`DELETE FROM questions WHERE quiz_id = $1`, [document_id]);
+            const allQuestions = [
+                ...(resolvedExamContent.part1 || []).map((q) => ({ ...q, part_number: 1, question_type: 'MCQ' })),
+                ...(resolvedExamContent.part2 || []).map((q) => ({ ...q, part_number: 2, question_type: 'TRUE_FALSE' })),
+                ...(resolvedExamContent.part3 || []).map((q) => ({ ...q, part_number: 3, question_type: 'SHORT_ANSWER' }))
+            ];
+            for (const q of allQuestions) {
+                await client.query(`INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) 
+                     VALUES ($1, $2, $3, $4, $5)`, [document_id, q.part_number, q.question_type, JSON.stringify(q), JSON.stringify(q.correctAnswer)]);
+            }
+        }
+        await client.query('COMMIT');
+        client.release();
         res.status(200).json({
+            success: true,
             message: 'Lưu đề thi và đáp án thành công!',
+            document_id,
             context_id: primaryContextId
         });
     }
     catch (error) {
+        await client.query('ROLLBACK');
+        client.release();
         console.error('LỖI LƯU ĐÁP ÁN VÀ NỘI DUNG ĐỀ:', error);
-        res.status(500).json({ message: 'Lỗi server', detail: error.message });
+        res.status(500).json({ message: 'Lỗi server khi lưu đáp án', detail: error.message });
     }
 };
 exports.saveAnswerKey = saveAnswerKey;
@@ -372,22 +394,59 @@ const submitExam = async (req, res) => {
             part2: p2Answers,
             part3: p3Answers
         };
-        // Lưu kết quả nộp bài vào bảng exam_submissions
-        const existDraft = await db_1.default.query(`SELECT id FROM exam_submissions WHERE student_id = $1 AND document_id = $2 AND status = 'IN_PROGRESS'`, [studentId, examId]);
+        const client = await db_1.default.connect();
         let submitResult;
-        if (existDraft.rows.length > 0) {
-            submitResult = await db_1.default.query(`UPDATE exam_submissions 
-                 SET student_answers = $1, total_score = $2, part1_score = $3, part2_score = $4, part3_score = $5, 
-                     cheat_count = $6, time_taken_seconds = $7, answers = $8, status = 'COMPLETED', submitted_at = NOW()
-                 WHERE id = $9 RETURNING *`, [normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details), existDraft.rows[0].id]);
-        }
-        else {
-            submitResult = await db_1.default.query(`INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, answers, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED') RETURNING *`, [examId, studentId, normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details)]);
-        }
-        // ========================================================
-        // PHASE 5: TÍNH TOÁN HIỆU SUẤT THEO CHUYÊN ĐỀ (ANALYTICS)
-        // ========================================================
         try {
+            await client.query('BEGIN');
+            // KIỂM TRA IDEMPOTENCY (CHỐNG DOUBLE-CLICK / RETRY)
+            const recentSubmit = await client.query(`SELECT id, is_performance_aggregated, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, answers 
+                 FROM exam_submissions 
+                 WHERE student_id = $1 AND document_id = $2 AND status = 'COMPLETED' 
+                 AND submitted_at > NOW() - INTERVAL '10 seconds'
+                 ORDER BY submitted_at DESC LIMIT 1`, [studentId, examId]);
+            if (recentSubmit.rows.length > 0) {
+                await client.query('ROLLBACK');
+                client.release();
+                const prev = recentSubmit.rows[0];
+                res.status(200).json({
+                    message: 'Bài thi đã được nộp thành công (Idempotent)',
+                    submissionId: prev.id,
+                    score: {
+                        totalScore: prev.total_score,
+                        p1Score: prev.part1_score,
+                        p2Score: prev.part2_score,
+                        p3Score: prev.part3_score,
+                        allow_view_answers: answerKey.allow_view_answers
+                    },
+                    summary: {
+                        total_score: prev.total_score,
+                        total_correct: p1Correct + p2Correct + p3Correct,
+                        total_questions: p1Total + p2Total + p3Total,
+                        cheat_count: prev.cheat_count,
+                        time_taken_seconds: prev.time_taken_seconds,
+                        part1: { correct: p1Correct, total: p1Total, score: prev.part1_score },
+                        part2: { correct: p2Correct, total: p2Total, score: prev.part2_score },
+                        part3: { correct: p3Correct, total: p3Total, score: prev.part3_score }
+                    },
+                    cheat_count: prev.cheat_count,
+                    details: typeof prev.answers === 'string' ? JSON.parse(prev.answers) : prev.answers
+                });
+                return;
+            }
+            // Lưu kết quả nộp bài vào bảng exam_submissions
+            const existDraft = await client.query(`SELECT id, is_performance_aggregated FROM exam_submissions WHERE student_id = $1 AND document_id = $2 AND status = 'IN_PROGRESS' FOR UPDATE`, [studentId, examId]);
+            if (existDraft.rows.length > 0) {
+                submitResult = await client.query(`UPDATE exam_submissions 
+                     SET student_answers = $1, total_score = $2, part1_score = $3, part2_score = $4, part3_score = $5, 
+                         cheat_count = $6, time_taken_seconds = $7, answers = $8, status = 'COMPLETED', submitted_at = NOW()
+                     WHERE id = $9 RETURNING *`, [normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details), existDraft.rows[0].id]);
+            }
+            else {
+                submitResult = await client.query(`INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, answers, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED') RETURNING *`, [examId, studentId, normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details)]);
+            }
+            // ========================================================
+            // PHASE 5: TÍNH TOÁN HIỆU SUẤT THEO CHUYÊN ĐỀ (ANALYTICS)
+            // ========================================================
             const examContent = answerKey.exam_content || {};
             const allQuestions = [
                 ...(examContent.part1 || []),
@@ -397,7 +456,6 @@ const submitExam = async (req, res) => {
             // Gom nhóm hiệu suất theo topic trong bài làm này
             const topicPerformance = {};
             for (const detail of details) {
-                // Thử tìm sub_topic trong exam_content hoặc fallback
                 const q = allQuestions.find(x => String(x.id) === String(detail.question_id));
                 const topic = q?.sub_topic || q?.topic || 'Chưa phân loại';
                 if (!topicPerformance[topic]) {
@@ -408,34 +466,44 @@ const submitExam = async (req, res) => {
                     topicPerformance[topic].corrects += 1;
                 }
             }
-            // Upsert vào bảng student_topic_performance
-            for (const [topic, stats] of Object.entries(topicPerformance)) {
-                await db_1.default.query(`INSERT INTO student_topic_performance (student_id, topic, attempt_count, correct_count, accuracy_rate)
-                     VALUES ($1, $2, $3, $4, $5)
-                     ON CONFLICT (student_id, topic) DO UPDATE SET 
-                        attempt_count = student_topic_performance.attempt_count + EXCLUDED.attempt_count,
-                        correct_count = student_topic_performance.correct_count + EXCLUDED.correct_count,
-                        accuracy_rate = ROUND(CAST((student_topic_performance.correct_count + EXCLUDED.correct_count) AS NUMERIC) * 100.0 / (student_topic_performance.attempt_count + EXCLUDED.attempt_count), 2),
-                        last_updated = CURRENT_TIMESTAMP`, [
-                    studentId,
-                    topic,
-                    stats.attempts,
-                    stats.corrects,
-                    Math.round((stats.corrects / stats.attempts) * 100 * 100) / 100
-                ]);
+            if (!submitResult.rows[0].is_performance_aggregated) {
+                // Upsert vào bảng student_topic_performance
+                for (const [topic, stats] of Object.entries(topicPerformance)) {
+                    await client.query(`INSERT INTO student_topic_performance (student_id, topic_name, total_questions, correct_answers, accuracy_rate)
+                         VALUES ($1, $2, $3, $4, $5)
+                         ON CONFLICT (student_id, topic_name) DO UPDATE SET 
+                            total_questions = student_topic_performance.total_questions + EXCLUDED.total_questions,
+                            correct_answers = student_topic_performance.correct_answers + EXCLUDED.correct_answers,
+                            accuracy_rate = CASE 
+                              WHEN (student_topic_performance.total_questions + EXCLUDED.total_questions) > 0 
+                              THEN ROUND(CAST((student_topic_performance.correct_answers + EXCLUDED.correct_answers) AS NUMERIC) * 100.0 / (student_topic_performance.total_questions + EXCLUDED.total_questions), 2)
+                              ELSE 0
+                            END,
+                            last_updated = CURRENT_TIMESTAMP`, [
+                        studentId,
+                        topic,
+                        stats.attempts,
+                        stats.corrects,
+                        stats.attempts > 0 ? Math.round((stats.corrects / stats.attempts) * 100 * 100) / 100 : 0
+                    ]);
+                }
+                // Lưu topic_performance JSONB vào exam_submissions
+                const topicPerformanceJsonb = {};
+                for (const [topic, stats] of Object.entries(topicPerformance)) {
+                    topicPerformanceJsonb[topic] = { correct: stats.corrects, total: stats.attempts };
+                }
+                await client.query(`UPDATE exam_submissions SET topic_performance = $1, is_performance_aggregated = TRUE WHERE id = $2`, [JSON.stringify(topicPerformanceJsonb), submitResult.rows[0].id]);
             }
-            // Lưu topic_performance JSONB vào exam_submissions (để getDashboard đọc)
-            const topicPerformanceJsonb = {};
-            for (const [topic, stats] of Object.entries(topicPerformance)) {
-                topicPerformanceJsonb[topic] = { correct: stats.corrects, total: stats.attempts };
-            }
-            if (submitResult.rows[0]?.id) {
-                await db_1.default.query(`UPDATE exam_submissions SET topic_performance = $1 WHERE id = $2`, [JSON.stringify(topicPerformanceJsonb), submitResult.rows[0].id]);
-            }
+            await client.query('COMMIT');
         }
         catch (analyticsErr) {
-            console.error('Lỗi tính toán Analytics:', analyticsErr);
-            // Không block luồng nộp bài nếu lỗi analytics
+            await client.query('ROLLBACK');
+            console.error('Lỗi lưu kết quả thi:', analyticsErr);
+            res.status(500).json({ message: 'Lỗi server khi nộp bài thi', detail: (analyticsErr).message });
+            return;
+        }
+        finally {
+            client.release();
         }
         res.status(200).json({
             message: 'Nộp bài và chấm điểm thành công!',
@@ -534,15 +602,45 @@ exports.getMySubmissions = getMySubmissions;
 const getExamKey = async (req, res) => {
     try {
         const { document_id } = req.params;
-        // CẬP NHẬT LỆNH SQL: SELECT THÊM exam_content ĐỂ TRẢ VỀ CHO FRONTEND
+        const user = req.user;
+        const contentOnly = req.query.contentOnly === 'true';
         const result = await db_1.default.query(`SELECT part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content 
              FROM exam_keys WHERE document_id = $1`, [document_id]);
-        if (result.rows.length > 0) {
-            res.status(200).json(result.rows[0]);
-        }
-        else {
+        if (result.rows.length === 0) {
             res.status(200).json(null);
+            return;
         }
+        const data = result.rows[0];
+        // Nếu là học sinh:
+        if (user && user.role === 'STUDENT') {
+            if (contentOnly) {
+                // Khi đang làm bài thi: ẩn toàn bộ đáp án đúng & lời giải
+                const strippedContent = data.exam_content ? JSON.parse(JSON.stringify(data.exam_content)) : null;
+                if (strippedContent) {
+                    if (Array.isArray(strippedContent.part1)) {
+                        strippedContent.part1.forEach((q) => { delete q.correctAnswer; delete q.explanation; delete q.solution; });
+                    }
+                    if (Array.isArray(strippedContent.part2)) {
+                        strippedContent.part2.forEach((q) => { delete q.correctAnswer; delete q.explanation; delete q.solution; });
+                    }
+                    if (Array.isArray(strippedContent.part3)) {
+                        strippedContent.part3.forEach((q) => { delete q.correctAnswer; delete q.explanation; delete q.solution; });
+                    }
+                }
+                res.status(200).json({
+                    exam_content: strippedContent,
+                    duration_minutes: data.duration_minutes,
+                    allow_view_answers: data.allow_view_answers
+                });
+                return;
+            }
+            else if (!data.allow_view_answers) {
+                // Giáo viên đã khóa tính năng xem đáp án
+                res.status(403).json({ message: 'Giáo viên chưa mở quyền xem đáp án đề thi này.' });
+                return;
+            }
+        }
+        res.status(200).json(data);
     }
     catch (error) {
         console.error('Lỗi lấy dữ liệu đề thi:', error);
@@ -598,10 +696,31 @@ const parseExamFromFile = async (req, res) => {
             res.status(400).json({ message: 'Không tìm thấy file tải lên!' });
             return;
         }
+        let secure_url = '';
+        try {
+            secure_url = await new Promise((resolve, reject) => {
+                const uploadStream = cloudinary_1.v2.uploader.upload_stream({ folder: 'documents', resource_type: 'auto' }, (error, result) => {
+                    if (error)
+                        reject(error);
+                    else
+                        resolve(result.secure_url);
+                });
+                uploadStream.end(file.buffer);
+            });
+        }
+        catch (uploadError) {
+            console.error('Cloudinary upload error:', uploadError);
+            res.status(500).json({ message: 'Lỗi tải file lên máy chủ lưu trữ (Cloudinary).' });
+            return;
+        }
+        if (!secure_url) {
+            res.status(500).json({ message: 'Không lấy được URL file.' });
+            return;
+        }
         // 1. LUÔN LUÔN tạo document TRƯỚC
-        let actual_document_id = document_id;
+        let actual_document_id = parseInt(String(document_id), 10);
         let folderId = null;
-        if (!actual_document_id) {
+        if (!actual_document_id || actual_document_id === 0) {
             // Find EXAM folder for this class_id
             if (class_id) {
                 const folderCheck = await db_1.default.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
@@ -613,7 +732,7 @@ const parseExamFromFile = async (req, res) => {
                     folderId = newFolder.rows[0].id;
                 }
             }
-            const docRes = await db_1.default.query(`INSERT INTO documents (title, file_url, category, folder_id) VALUES ($1, $2, 'EXAM', $3) RETURNING id`, [file.originalname || 'Đề thi tự động tạo', file.path, folderId]);
+            const docRes = await db_1.default.query(`INSERT INTO documents (title, file_url, category, folder_id) VALUES ($1, $2, 'EXAM', $3) RETURNING id`, [file.originalname || 'Đề thi tự động tạo', secure_url, folderId]);
             actual_document_id = docRes.rows[0].id;
         }
         console.log('--- ĐANG GỌI FILE CHO GEMINI AI XỬ LÝ ---');
@@ -707,57 +826,64 @@ exports.getAllExams = getAllExams;
 // 9. API PHASE 3: XUẤT BẢN ĐỀ THI (PUBLISH EXAM)
 // ========================================================
 const publishExam = async (req, res) => {
+    const client = await db_1.default.connect();
     try {
         let { document_id, title, grade, subject, duration_minutes, class_id, exam_content } = req.body;
+        await client.query('BEGIN');
         let folderId = null;
         if (class_id) {
-            const folderCheck = await db_1.default.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
+            const folderCheck = await client.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
             if (folderCheck.rows.length > 0) {
                 folderId = folderCheck.rows[0].id;
             }
             else {
-                const newFolder = await db_1.default.query("INSERT INTO folders (name, category, class_id, teacher_id) VALUES ('Đề thi', 'EXAM', $1, $2) RETURNING id", [class_id, req.user?.id || null]);
+                const newFolder = await client.query("INSERT INTO folders (name, category, class_id, teacher_id) VALUES ('Đề thi', 'EXAM', $1, $2) RETURNING id", [class_id, req.user?.id || null]);
                 folderId = newFolder.rows[0].id;
             }
         }
         // 1. Tạo hoặc cập nhật Document
-        let actual_document_id = document_id;
-        if (!document_id || document_id === 0) {
-            const docRes = await db_1.default.query(`INSERT INTO documents (title, category, folder_id, teacher_id) 
-                 VALUES ($1, 'EXAM', $2, $3) RETURNING id`, [title || 'Đề thi AI', folderId, req.user?.id || null]);
+        let actual_document_id = parseInt(String(document_id), 10);
+        if (!actual_document_id || actual_document_id === 0) {
+            const docRes = await client.query(`INSERT INTO documents (title, category, folder_id, class_id, teacher_id) 
+                 VALUES ($1, 'EXAM', $2, $3, $4) RETURNING id`, [title || 'Đề thi AI', folderId, class_id || null, req.user?.id || null]);
             actual_document_id = docRes.rows[0].id;
         }
         else {
-            await db_1.default.query(`UPDATE documents SET title = $1, folder_id = $2 WHERE id = $3`, [title, folderId, actual_document_id]);
+            await client.query(`UPDATE documents SET title = $1, folder_id = $2, class_id = $3, category = 'EXAM' WHERE id = $4`, [title, folderId, class_id || null, actual_document_id]);
         }
         if (exam_content) {
             // 2. Lưu vào bảng exam_keys (để hiện thị lại khi vào xem)
             const part1_key = exam_content.part1?.reduce((acc, q) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
             const part2_key = exam_content.part2?.reduce((acc, q) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
             const part3_key = exam_content.part3?.reduce((acc, q) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
-            await db_1.default.query(`INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
+            await client.query(`INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
                  VALUES ($1, $2, $3, $4, $5, true, $6, $7) 
                  ON CONFLICT (document_id) 
                  DO UPDATE SET 
+                    class_id = COALESCE($2, exam_keys.class_id),
                     part1_key = $3, part2_key = $4, part3_key = $5,
-                    duration_minutes = $6, exam_content = $7`, [actual_document_id, class_id, part1_key, part2_key, part3_key, duration_minutes, exam_content]);
+                    duration_minutes = $6, exam_content = $7`, [actual_document_id, class_id, part1_key, part2_key, part3_key, duration_minutes || 50, exam_content]);
             // 3. Xóa các câu hỏi cũ (nếu có)
-            await db_1.default.query(`DELETE FROM questions WHERE quiz_id = $1`, [actual_document_id]);
+            await client.query(`DELETE FROM questions WHERE quiz_id = $1`, [actual_document_id]);
             // 4. Cập nhật lại bảng questions thực tế
             const allQuestions = [
                 ...(exam_content.part1 || []).map((q) => ({ ...q, part_number: 1, question_type: 'MCQ' })),
                 ...(exam_content.part2 || []).map((q) => ({ ...q, part_number: 2, question_type: 'TRUE_FALSE' })),
                 ...(exam_content.part3 || []).map((q) => ({ ...q, part_number: 3, question_type: 'SHORT_ANSWER' }))
             ];
-            if (allQuestions.length > 0) {
-                await Promise.all(allQuestions.map(q => db_1.default.query(`INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) VALUES ($1, $2, $3, $4, $5)`, [actual_document_id, q.part_number, q.question_type, JSON.stringify(q), JSON.stringify(q.correctAnswer)])));
+            for (const q of allQuestions) {
+                await client.query(`INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) VALUES ($1, $2, $3, $4, $5)`, [actual_document_id, q.part_number, q.question_type, JSON.stringify(q), JSON.stringify(q.correctAnswer)]);
             }
         }
-        res.status(200).json({ message: 'Xuất bản đề thi thành công!', document_id: actual_document_id });
+        await client.query('COMMIT');
+        client.release();
+        res.status(200).json({ success: true, message: 'Xuất bản đề thi thành công!', document_id: actual_document_id });
     }
     catch (error) {
+        await client.query('ROLLBACK');
+        client.release();
         console.error('Lỗi publish đề:', error);
-        res.status(500).json({ message: 'Lỗi xuất bản đề thi' });
+        res.status(500).json({ message: 'Lỗi xuất bản đề thi', detail: error.message });
     }
 };
 exports.publishExam = publishExam;

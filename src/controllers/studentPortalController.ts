@@ -193,7 +193,7 @@ export const getStudentExams = async (req: AuthRequest, res: Response): Promise<
             FROM documents d
             LEFT JOIN exam_keys ek ON ek.document_id = d.id
             LEFT JOIN folders f ON d.folder_id = f.id
-            LEFT JOIN classes c ON (ek.class_id = c.id OR f.class_id = c.id OR (ek.class_id IS NULL AND f.class_id IS NULL AND c.teacher_id = d.teacher_id))
+            LEFT JOIN classes c ON (d.class_id = c.id OR ek.class_id = c.id OR f.class_id = c.id OR (d.class_id IS NULL AND ek.class_id IS NULL AND f.class_id IS NULL AND c.teacher_id = d.teacher_id))
             JOIN enrollments e ON e.class_id = c.id
             WHERE e.student_id = $1 
               AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
