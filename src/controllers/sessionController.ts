@@ -295,17 +295,28 @@ export const syncCalendar = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    const userResult = await pool.query('SELECT google_calendar_tokens FROM users WHERE id = $1', [teacherId]);
-    const tokens = userResult.rows[0]?.google_calendar_tokens;
-    if (!tokens) {
+    const userResult = await pool.query('SELECT google_calendar_tokens, full_name, email FROM users WHERE id = $1', [teacherId]);
+    const rawTokens = userResult.rows[0]?.google_calendar_tokens;
+    if (!rawTokens) {
       res.status(400).json({ message: 'Tài khoản chưa liên kết Google Calendar. Vui lòng bấm "Tích hợp Google Calendar" để cấp quyền trước.' });
       return;
     }
 
-    const parsedTokens = typeof tokens === 'string' ? JSON.parse(tokens) : tokens;
+    const parsedTokens = typeof rawTokens === 'string' ? JSON.parse(rawTokens) : rawTokens;
     const userOAuth2Client = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI);
     userOAuth2Client.setCredentials(parsedTokens);
     const calendar = google.calendar({ version: 'v3', auth: userOAuth2Client });
+
+    let googleEmail = parsedTokens.google_email || '';
+    if (!googleEmail) {
+      try {
+        const oauth2 = google.oauth2({ version: 'v2', auth: userOAuth2Client });
+        const userInfo = await oauth2.userinfo.get();
+        googleEmail = userInfo.data.email || '';
+      } catch (e) {
+        console.warn('Could not fetch google userinfo email:', e);
+      }
+    }
 
     // Format local ISO date cleanly without UTC shift
     let dateStr = '';
@@ -343,7 +354,7 @@ export const syncCalendar = async (req: AuthRequest, res: Response): Promise<voi
 
     // Get active students' emails strictly for this class
     const emailsRes = await pool.query(
-      `SELECT s.email FROM students s
+      `SELECT s.email, s.full_name FROM students s
        JOIN enrollments cm ON s.id = cm.student_id
        WHERE cm.class_id = $1 
          AND (cm.status IS NULL OR cm.status = 'ACTIVE' OR cm.status = 'Đang học') 
@@ -351,39 +362,79 @@ export const syncCalendar = async (req: AuthRequest, res: Response): Promise<voi
          AND s.email IS NOT NULL AND s.email != ''`,
       [session.class_id]
     );
-    const attendees = emailsRes.rows.map(r => ({ email: r.email }));
+    const attendees = emailsRes.rows.map(r => ({ email: r.email, displayName: r.full_name }));
     const summaryText = session.class_name ? `[${session.class_name}] ${session.content || 'Lịch học'}` : (session.content || 'Lịch học');
-    const descriptionText = `Lớp: ${session.class_name || 'Lớp học'}\nNội dung: ${session.content || 'Buổi học theo chương trình'}\nThời gian: ${startT} - ${endT}`;
+    const descriptionText = `Lớp: ${session.class_name || 'Lớp học'}\nNội dung: ${session.content || 'Buổi học theo chương trình'}\nThời gian: ${startT} - ${endT}\nGiáo viên: ${userResult.rows[0]?.full_name || 'Giáo viên'}`;
 
-    if (session.google_event_id) {
-      // Update existing event
-      await calendar.events.patch({
-        calendarId: 'primary',
-        eventId: session.google_event_id,
-        requestBody: {
-          summary: summaryText,
-          description: descriptionText,
-          start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
-          end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
-          attendees: attendees.length > 0 ? attendees : undefined
+    let eventId = session.google_event_id;
+    let htmlLink = '';
+
+    if (eventId) {
+      try {
+        const patchRes = await calendar.events.patch({
+          calendarId: 'primary',
+          eventId: eventId,
+          sendUpdates: attendees.length > 0 ? 'all' : 'none',
+          requestBody: {
+            summary: summaryText,
+            description: descriptionText,
+            start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+            end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+            status: 'confirmed',
+            attendees: attendees.length > 0 ? attendees : undefined
+          }
+        });
+        eventId = patchRes.data.id;
+        htmlLink = patchRes.data.htmlLink || '';
+      } catch (patchErr: any) {
+        if (patchErr?.code === 404 || patchErr?.message?.includes('Not Found')) {
+          console.warn('Sự kiện cũ không còn tồn tại trên Google Calendar, tiến hành tạo mới...');
+          eventId = null;
+        } else {
+          throw patchErr;
         }
-      });
-      res.status(200).json({ message: 'Đồng bộ lại lịch Google thành công' });
-    } else {
-      // Create new event
-      const event = await calendar.events.insert({
-        calendarId: 'primary',
-        requestBody: {
-          summary: summaryText,
-          description: descriptionText,
-          start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
-          end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
-          attendees: attendees.length > 0 ? attendees : undefined
-        }
-      });
-      await pool.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [event.data.id, session.id]);
-      res.status(200).json({ message: 'Tạo mới và đồng bộ lịch Google thành công', eventId: event.data.id });
+      }
     }
+
+    if (!eventId) {
+      const insertRes = await calendar.events.insert({
+        calendarId: 'primary',
+        sendUpdates: attendees.length > 0 ? 'all' : 'none',
+        requestBody: {
+          summary: summaryText,
+          description: descriptionText,
+          start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+          end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+          status: 'confirmed',
+          attendees: attendees.length > 0 ? attendees : undefined
+        }
+      });
+      eventId = insertRes.data.id;
+      htmlLink = insertRes.data.htmlLink || '';
+      await pool.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [eventId, session.id]);
+    }
+
+    // POST-SYNC VERIFICATION (P0)
+    const verifyRes = await calendar.events.get({
+      calendarId: 'primary',
+      eventId: eventId as string
+    });
+
+    if (!verifyRes.data || verifyRes.data.status === 'cancelled') {
+      throw new Error('Google Calendar chưa xác nhận sự kiện. Vui lòng thử lại.');
+    }
+
+    htmlLink = verifyRes.data.htmlLink || htmlLink || `https://calendar.google.com/calendar/r/eventedit/${eventId}`;
+
+    res.status(200).json({ 
+      success: true,
+      message: 'Đồng bộ buổi học vào Google Calendar thành công!',
+      event_id: eventId,
+      html_link: htmlLink,
+      calendar_id: 'primary',
+      calendar_account: googleEmail || undefined,
+      attendees_count: attendees.length
+    });
   } catch (error: any) {
     console.error("Lỗi đồng bộ Google Calendar:", error);
     if (error?.message?.includes('invalid_grant') || error?.code === 401) {

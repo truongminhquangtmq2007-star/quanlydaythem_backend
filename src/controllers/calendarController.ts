@@ -23,7 +23,12 @@ export const authGoogleCalendar = (req: AuthRequest, res: Response): void => {
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
-      scope: ['https://www.googleapis.com/auth/calendar.events'],
+      scope: [
+        'https://www.googleapis.com/auth/calendar.events',
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile'
+      ],
       prompt: 'consent',
       state: String(userId)
     });
@@ -53,10 +58,21 @@ export const getCalendarStatus = async (req: AuthRequest, res: Response): Promis
     }
 
     const userResult = await pool.query('SELECT google_calendar_tokens FROM users WHERE id = $1', [userId]);
-    const tokens = userResult.rows[0]?.google_calendar_tokens;
-    const isConnected = Boolean(tokens && (typeof tokens === 'object' ? Object.keys(tokens).length > 0 : String(tokens).length > 5));
+    const rawTokens = userResult.rows[0]?.google_calendar_tokens;
 
-    res.status(200).json({ connected: isConnected });
+    if (!rawTokens) {
+      res.status(200).json({ connected: false });
+      return;
+    }
+
+    const tokens = typeof rawTokens === 'string' ? JSON.parse(rawTokens) : rawTokens;
+    const isConnected = Boolean(tokens && (tokens.access_token || tokens.refresh_token));
+    const googleEmail = tokens.google_email || '';
+
+    res.status(200).json({ 
+      connected: isConnected, 
+      email: googleEmail || undefined 
+    });
   } catch (error) {
     console.error('Lỗi kiểm tra trạng thái Google Calendar:', error);
     res.status(500).json({ message: 'Lỗi server' });
@@ -80,13 +96,30 @@ export const oauthCallback = async (req: Request, res: Response): Promise<void> 
       throw new Error('Invalid user ID in OAuth state');
     }
 
+    // Retrieve Google account email identity safely
+    let googleEmail = '';
+    try {
+      const userOAuth2Client = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI);
+      userOAuth2Client.setCredentials(tokens);
+      const oauth2 = google.oauth2({ version: 'v2', auth: userOAuth2Client });
+      const userInfo = await oauth2.userinfo.get();
+      googleEmail = userInfo.data.email || '';
+    } catch (e) {
+      console.warn('Could not fetch userinfo email during callback:', e);
+    }
+
+    const tokenPayload = {
+      ...tokens,
+      google_email: googleEmail
+    };
+
     await pool.query(
       'UPDATE users SET google_calendar_tokens = $1 WHERE id = $2',
-      [JSON.stringify(tokens), userId]
+      [JSON.stringify(tokenPayload), userId]
     );
 
     const frontendUrl = process.env.FRONTEND_URL || 'https://quanlydaythem-frontend-dun.vercel.app';
-    res.redirect(`${frontendUrl}/quan-ly-tien-do?sync=success`);
+    res.redirect(`${frontendUrl}/quan-ly-tien-do?sync=success${googleEmail ? `&email=${encodeURIComponent(googleEmail)}` : ''}`);
   } catch (error) {
     console.error('Error exchanging OAuth code:', error);
     const frontendUrl = process.env.FRONTEND_URL || 'https://quanlydaythem-frontend-dun.vercel.app';
@@ -100,14 +133,14 @@ export const syncEvent = async (req: AuthRequest, res: Response): Promise<void> 
     const { summary, description, start_time, end_time } = req.body;
 
     const userResult = await pool.query('SELECT google_calendar_tokens FROM users WHERE id = $1', [userId]);
-    const tokens = userResult.rows[0]?.google_calendar_tokens;
+    const rawTokens = userResult.rows[0]?.google_calendar_tokens;
 
-    if (!tokens) {
+    if (!rawTokens) {
       res.status(400).json({ message: 'Tài khoản chưa liên kết Google Calendar. Vui lòng bấm "Tích hợp Google Calendar" trước.' });
       return;
     }
 
-    const parsedTokens = typeof tokens === 'string' ? JSON.parse(tokens) : tokens;
+    const parsedTokens = typeof rawTokens === 'string' ? JSON.parse(rawTokens) : rawTokens;
     const userOAuth2Client = new google.auth.OAuth2(
       GOOGLE_CLIENT_ID,
       GOOGLE_CLIENT_SECRET,
@@ -126,7 +159,12 @@ export const syncEvent = async (req: AuthRequest, res: Response): Promise<void> 
       }
     });
 
-    res.status(200).json({ message: 'Đồng bộ sự kiện thành công', eventId: event.data.id });
+    res.status(200).json({ 
+      success: true,
+      message: 'Đồng bộ sự kiện thành công', 
+      event_id: event.data.id,
+      html_link: event.data.htmlLink 
+    });
   } catch (error: any) {
     console.error('Lỗi đồng bộ event:', error);
     if (error?.message?.includes('invalid_grant') || error?.code === 401) {

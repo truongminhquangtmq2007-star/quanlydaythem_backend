@@ -18,16 +18,35 @@ const getSessions = async (req, res) => {
     try {
         let result;
         if (class_id) {
+            if (user?.role === 'TEACHER') {
+                const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [class_id, user.id]);
+                if (check.rows.length === 0) {
+                    res.status(403).json({ message: "Không có quyền xem lịch của lớp này" });
+                    return;
+                }
+            }
             result = await db_1.default.query(`SELECT s.*, 
-                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
+                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count,
+                (SELECT COUNT(*) FROM attendance a WHERE a.class_id = s.class_id AND a.attendance_date = s.session_date) as attendance_count
          FROM sessions s WHERE class_id = $1 ORDER BY session_date ASC`, [class_id]);
         }
         else {
-            result = await db_1.default.query(`SELECT s.*, c.class_name,
-                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
-         FROM sessions s 
-         JOIN classes c ON s.class_id = c.id 
-         WHERE c.teacher_id = $1 ORDER BY s.session_date ASC`, [user.id]);
+            if (user?.role === 'ADMIN') {
+                result = await db_1.default.query(`SELECT s.*, c.class_name,
+                  (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count,
+                  (SELECT COUNT(*) FROM attendance a WHERE a.class_id = s.class_id AND a.attendance_date = s.session_date) as attendance_count
+           FROM sessions s 
+           JOIN classes c ON s.class_id = c.id 
+           ORDER BY s.session_date ASC`);
+            }
+            else {
+                result = await db_1.default.query(`SELECT s.*, c.class_name,
+                  (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count,
+                  (SELECT COUNT(*) FROM attendance a WHERE a.class_id = s.class_id AND a.attendance_date = s.session_date) as attendance_count
+           FROM sessions s 
+           JOIN classes c ON s.class_id = c.id 
+           WHERE c.teacher_id = $1 ORDER BY s.session_date ASC`, [user?.id]);
+            }
         }
         res.status(200).json(result.rows);
     }
@@ -41,6 +60,22 @@ exports.getSessions = getSessions;
 const upsertSession = async (req, res) => {
     const { id, class_id, session_date, start_time, content, homework } = req.body;
     try {
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            let checkClassId = class_id;
+            if (id) {
+                const getSession = await db_1.default.query('SELECT class_id FROM sessions WHERE id = $1', [id]);
+                if (getSession.rows.length > 0)
+                    checkClassId = getSession.rows[0].class_id;
+            }
+            if (checkClassId) {
+                const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+                if (check.rows.length === 0) {
+                    res.status(403).json({ message: "Không có quyền sửa lớp này" });
+                    return;
+                }
+            }
+        }
         let result;
         if (id) {
             result = await db_1.default.query(`UPDATE sessions 
@@ -64,6 +99,14 @@ exports.upsertSession = upsertSession;
 const publishSessions = async (req, res) => {
     const { class_id } = req.body;
     try {
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [class_id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền sửa lớp này" });
+                return;
+            }
+        }
         // Chốt toàn bộ các bản nháp của lớp đang được chọn
         await db_1.default.query(`UPDATE sessions SET is_published = true WHERE class_id = $1`, [class_id]);
         res.status(200).json({ message: '🚀 Đã công bố lịch học cho Phụ huynh!' });
@@ -77,6 +120,14 @@ exports.publishSessions = publishSessions;
 const deleteSession = async (req, res) => {
     const { id } = req.params;
     try {
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền xóa session này" });
+                return;
+            }
+        }
         await db_1.default.query('DELETE FROM sessions WHERE id = $1', [id]);
         res.status(200).json({ message: 'Đã xóa buổi học' });
     }
@@ -94,7 +145,14 @@ const getPublishedSessions = async (req, res) => {
     const { student_id } = req.query;
     try {
         const result = await db_1.default.query(`SELECT s.*, 
-              e.is_present, e.focus_level, e.teacher_notes, e.is_billed, e.is_paid 
+              e.is_present, e.focus_level, e.teacher_notes, e.is_billed, 
+              (SELECT EXISTS(
+                   SELECT 1 FROM tuition_bills b 
+                   WHERE b.student_id = $1 
+                     AND s.session_date >= b.start_date 
+                     AND s.session_date <= b.end_date 
+                     AND b.is_paid = true
+              )) as is_paid 
        FROM sessions s
        LEFT JOIN session_evaluations e ON s.id = e.session_id AND e.student_id = $1
        WHERE s.is_published = true 
@@ -110,7 +168,15 @@ exports.getPublishedSessions = getPublishedSessions;
 // 5. Lấy danh sách đánh giá của 1 buổi học cụ thể
 const getEvaluations = async (req, res) => {
     const { session_id } = req.query;
+    const user = req.user;
     try {
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [session_id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền xem đánh giá này" });
+                return;
+            }
+        }
         const result = await db_1.default.query(`SELECT e.*, s.full_name as student_name 
        FROM session_evaluations e 
        JOIN students s ON e.student_id = s.id 
@@ -126,7 +192,15 @@ exports.getEvaluations = getEvaluations;
 // 6. Lưu điểm danh & nhận xét cho từng học sinh
 const saveEvaluation = async (req, res) => {
     const { session_id, student_id, is_present, focus_level, teacher_notes } = req.body;
+    const user = req.user;
     try {
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [session_id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền lưu đánh giá cho buổi học này" });
+                return;
+            }
+        }
         // Kiểm tra xem bé này đã được chấm điểm trong buổi này chưa
         const check = await db_1.default.query(`SELECT id FROM session_evaluations WHERE session_id = $1 AND student_id = $2`, [session_id, student_id]);
         if (check.rows.length > 0) {
@@ -176,56 +250,160 @@ const syncCalendar = async (req, res) => {
             res.status(401).json({ message: 'Unauthorized' });
             return;
         }
-        const sessionRes = await db_1.default.query('SELECT * FROM sessions WHERE id = $1', [id]);
+        const sessionRes = await db_1.default.query(`SELECT s.*, c.teacher_id, c.class_name 
+       FROM sessions s 
+       JOIN classes c ON s.class_id = c.id 
+       WHERE s.id = $1`, [id]);
         if (sessionRes.rows.length === 0) {
             res.status(404).json({ message: 'Không tìm thấy buổi học' });
             return;
         }
         const session = sessionRes.rows[0];
-        const userResult = await db_1.default.query('SELECT google_calendar_tokens FROM users WHERE id = $1', [teacherId]);
-        const tokens = userResult.rows[0]?.google_calendar_tokens;
-        if (!tokens) {
-            res.status(400).json({ message: 'Chưa liên kết Google Calendar' });
+        if (req.user?.role === 'TEACHER' && session.teacher_id !== teacherId) {
+            res.status(403).json({ message: 'Bạn không có quyền đồng bộ buổi học của lớp khác' });
             return;
         }
-        const parsedTokens = typeof tokens === 'string' ? JSON.parse(tokens) : tokens;
+        if (!session.is_published) {
+            res.status(400).json({ message: 'Buổi học đang ở trạng thái Nháp. Vui lòng bấm "Công bố buổi học" trước khi đồng bộ Google Calendar.' });
+            return;
+        }
+        const userResult = await db_1.default.query('SELECT google_calendar_tokens, full_name, email FROM users WHERE id = $1', [teacherId]);
+        const rawTokens = userResult.rows[0]?.google_calendar_tokens;
+        if (!rawTokens) {
+            res.status(400).json({ message: 'Tài khoản chưa liên kết Google Calendar. Vui lòng bấm "Tích hợp Google Calendar" để cấp quyền trước.' });
+            return;
+        }
+        const parsedTokens = typeof rawTokens === 'string' ? JSON.parse(rawTokens) : rawTokens;
         const userOAuth2Client = new googleapis_1.google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI);
         userOAuth2Client.setCredentials(parsedTokens);
         const calendar = googleapis_1.google.calendar({ version: 'v3', auth: userOAuth2Client });
-        // Get emails
-        const emailsRes = await db_1.default.query(`SELECT s.email FROM students s
-       JOIN enrollments cm ON s.id = cm.student_id
-       WHERE cm.class_id = $1 AND cm.status = 'ACTIVE' AND s.is_active = true AND s.email IS NOT NULL`, [session.class_id]);
-        const attendees = emailsRes.rows.map(r => ({ email: r.email }));
-        if (session.google_event_id) {
-            // Update existing event
-            await calendar.events.patch({
-                calendarId: 'primary',
-                eventId: session.google_event_id,
-                requestBody: {
-                    attendees: attendees
-                }
-            });
-            res.status(200).json({ message: 'Đồng bộ lại lịch Google thành công' });
+        let googleEmail = parsedTokens.google_email || '';
+        if (!googleEmail) {
+            try {
+                const oauth2 = googleapis_1.google.oauth2({ version: 'v2', auth: userOAuth2Client });
+                const userInfo = await oauth2.userinfo.get();
+                googleEmail = userInfo.data.email || '';
+            }
+            catch (e) {
+                console.warn('Could not fetch google userinfo email:', e);
+            }
+        }
+        // Format local ISO date cleanly without UTC shift
+        let dateStr = '';
+        if (session.session_date instanceof Date) {
+            const d = session.session_date;
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            dateStr = `${yyyy}-${mm}-${dd}`;
         }
         else {
-            // Create new event
-            const event = await calendar.events.insert({
+            dateStr = String(session.session_date).substring(0, 10);
+        }
+        const rawStart = session.start_time ? String(session.start_time).trim() : '18:00';
+        const startParts = rawStart.split(':');
+        const startHour = parseInt(startParts[0] || '18', 10);
+        const startMin = parseInt(startParts[1] || '0', 10);
+        const startT = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00`;
+        // Calculate end time if not provided: default +90 minutes
+        let endT = '';
+        if (session.end_time) {
+            const rawEnd = String(session.end_time).trim();
+            const endParts = rawEnd.split(':');
+            const endHour = parseInt(endParts[0] || '19', 10);
+            const endMin = parseInt(endParts[1] || '30', 10);
+            endT = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`;
+        }
+        else {
+            const totalStartMin = startHour * 60 + startMin;
+            const totalEndMin = totalStartMin + 90;
+            const endHour = Math.floor(totalEndMin / 60) % 24;
+            const endMin = totalEndMin % 60;
+            endT = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`;
+        }
+        // Get active students' emails strictly for this class
+        const emailsRes = await db_1.default.query(`SELECT s.email, s.full_name FROM students s
+       JOIN enrollments cm ON s.id = cm.student_id
+       WHERE cm.class_id = $1 
+         AND (cm.status IS NULL OR cm.status = 'ACTIVE' OR cm.status = 'Đang học') 
+         AND (s.is_active = true OR s.is_active IS NULL) 
+         AND s.email IS NOT NULL AND s.email != ''`, [session.class_id]);
+        const attendees = emailsRes.rows.map(r => ({ email: r.email, displayName: r.full_name }));
+        const summaryText = session.class_name ? `[${session.class_name}] ${session.content || 'Lịch học'}` : (session.content || 'Lịch học');
+        const descriptionText = `Lớp: ${session.class_name || 'Lớp học'}\nNội dung: ${session.content || 'Buổi học theo chương trình'}\nThời gian: ${startT} - ${endT}\nGiáo viên: ${userResult.rows[0]?.full_name || 'Giáo viên'}`;
+        let eventId = session.google_event_id;
+        let htmlLink = '';
+        if (eventId) {
+            try {
+                const patchRes = await calendar.events.patch({
+                    calendarId: 'primary',
+                    eventId: eventId,
+                    sendUpdates: attendees.length > 0 ? 'all' : 'none',
+                    requestBody: {
+                        summary: summaryText,
+                        description: descriptionText,
+                        start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+                        end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+                        status: 'confirmed',
+                        attendees: attendees.length > 0 ? attendees : undefined
+                    }
+                });
+                eventId = patchRes.data.id;
+                htmlLink = patchRes.data.htmlLink || '';
+            }
+            catch (patchErr) {
+                if (patchErr?.code === 404 || patchErr?.message?.includes('Not Found')) {
+                    console.warn('Sự kiện cũ không còn tồn tại trên Google Calendar, tiến hành tạo mới...');
+                    eventId = null;
+                }
+                else {
+                    throw patchErr;
+                }
+            }
+        }
+        if (!eventId) {
+            const insertRes = await calendar.events.insert({
                 calendarId: 'primary',
+                sendUpdates: attendees.length > 0 ? 'all' : 'none',
                 requestBody: {
-                    summary: session.content || 'Lịch học',
-                    start: { dateTime: session.session_date + 'T' + (session.start_time || '18:00') + ':00+07:00', timeZone: 'Asia/Ho_Chi_Minh' },
-                    end: { dateTime: session.session_date + 'T' + (session.end_time || '19:30') + ':00+07:00', timeZone: 'Asia/Ho_Chi_Minh' },
+                    summary: summaryText,
+                    description: descriptionText,
+                    start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+                    end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+                    status: 'confirmed',
                     attendees: attendees.length > 0 ? attendees : undefined
                 }
             });
-            await db_1.default.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [event.data.id, session.id]);
-            res.status(200).json({ message: 'Tạo mới và đồng bộ lịch Google thành công' });
+            eventId = insertRes.data.id;
+            htmlLink = insertRes.data.htmlLink || '';
+            await db_1.default.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [eventId, session.id]);
         }
+        // POST-SYNC VERIFICATION (P0)
+        const verifyRes = await calendar.events.get({
+            calendarId: 'primary',
+            eventId: eventId
+        });
+        if (!verifyRes.data || verifyRes.data.status === 'cancelled') {
+            throw new Error('Google Calendar chưa xác nhận sự kiện. Vui lòng thử lại.');
+        }
+        htmlLink = verifyRes.data.htmlLink || htmlLink || `https://calendar.google.com/calendar/r/eventedit/${eventId}`;
+        res.status(200).json({
+            success: true,
+            message: 'Đồng bộ buổi học vào Google Calendar thành công!',
+            event_id: eventId,
+            html_link: htmlLink,
+            calendar_id: 'primary',
+            calendar_account: googleEmail || undefined,
+            attendees_count: attendees.length
+        });
     }
     catch (error) {
-        console.error("Lỗi đồng bộ lại Google Calendar:", error);
-        res.status(500).json({ message: 'Lỗi khi đồng bộ Google Calendar' });
+        console.error("Lỗi đồng bộ Google Calendar:", error);
+        if (error?.message?.includes('invalid_grant') || error?.code === 401) {
+            res.status(401).json({ message: 'Tài khoản Google Calendar cần được kết nối lại do phiên đăng nhập đã hết hạn. Vui lòng bấm "Tích hợp Google Calendar" để cấp lại quyền.' });
+            return;
+        }
+        res.status(500).json({ message: error?.message || 'Lỗi khi đồng bộ Google Calendar' });
     }
 };
 exports.syncCalendar = syncCalendar;
