@@ -221,12 +221,17 @@ export const getBillInvoice = async (req: AuthRequest, res: Response): Promise<v
       SELECT b.*, s.full_name, s.phone_number, s.school_name,
              COALESCE(c.class_name, 'Lớp học') as class_name,
              COALESCE(c.tuition_fee, 0) as tuition_fee,
-             u.full_name as teacher_name
+             u.id as teacher_id,
+             u.full_name as teacher_name,
+             u.bank_code,
+             u.bank_name,
+             u.account_number,
+             u.account_name
       FROM tuition_bills b 
       JOIN students s ON b.student_id = s.id 
       LEFT JOIN enrollments e ON e.student_id = s.id
       LEFT JOIN classes c ON e.class_id = c.id
-      LEFT JOIN users u ON c.teacher_id = u.id
+      LEFT JOIN users u ON (c.teacher_id = u.id OR s.teacher_id = u.id)
       WHERE b.id = $1
       ORDER BY c.id ASC LIMIT 1`, [id]);
       
@@ -236,6 +241,14 @@ export const getBillInvoice = async (req: AuthRequest, res: Response): Promise<v
     }
     const bill = billRes.rows[0];
     const teacherId = user?.role === 'TEACHER' ? user.id : null;
+
+    // Dynamic Teacher Bank Account
+    const teacherBank = (bill.bank_code && bill.account_number) ? {
+      bank_code: bill.bank_code,
+      bank_name: bill.bank_name || bill.bank_code,
+      account_number: bill.account_number,
+      account_name: bill.account_name || bill.teacher_name || ''
+    } : null;
 
     // Requirement: SESSIONS as primary list source, then LEFT JOIN attendance
     const sessionsRes = await pool.query(`
@@ -279,7 +292,7 @@ export const getBillInvoice = async (req: AuthRequest, res: Response): Promise<v
       assessments = [];
     }
 
-    res.json({ bill, sessions: sessionsRes.rows, available_assessments: assessments });
+    res.json({ bill, sessions: sessionsRes.rows, available_assessments: assessments, teacher_bank: teacherBank });
   } catch (err: any) { 
     console.error("Lỗi getBillInvoice:", err);
     res.status(500).json({ error: err.message }); 
