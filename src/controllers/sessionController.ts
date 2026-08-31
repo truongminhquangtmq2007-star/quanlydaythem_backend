@@ -18,14 +18,30 @@ export const getSessions = async (req: AuthRequest, res: Response): Promise<void
     if (class_id) {
       result = await pool.query(
         `SELECT s.*, 
-                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
+                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count,
+                (SELECT EXISTS(
+                   SELECT 1 FROM tuition_bills b 
+                   JOIN enrollments e ON e.student_id = b.student_id 
+                   WHERE e.class_id = s.class_id 
+                     AND s.session_date >= b.start_date 
+                     AND s.session_date <= b.end_date 
+                     AND b.is_paid = true
+                )) as is_paid
          FROM sessions s WHERE class_id = $1 ORDER BY session_date ASC`,
         [class_id]
       );
     } else {
       result = await pool.query(
         `SELECT s.*, c.class_name,
-                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
+                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count,
+                (SELECT EXISTS(
+                   SELECT 1 FROM tuition_bills b 
+                   JOIN enrollments e ON e.student_id = b.student_id 
+                   WHERE e.class_id = s.class_id 
+                     AND s.session_date >= b.start_date 
+                     AND s.session_date <= b.end_date 
+                     AND b.is_paid = true
+                )) as is_paid
          FROM sessions s 
          JOIN classes c ON s.class_id = c.id 
          WHERE c.teacher_id = $1 ORDER BY s.session_date ASC`,
@@ -102,7 +118,14 @@ export const getPublishedSessions = async (req: AuthRequest, res: Response): Pro
   try {
     const result = await pool.query(
       `SELECT s.*, 
-              e.is_present, e.focus_level, e.teacher_notes, e.is_billed, e.is_paid 
+              e.is_present, e.focus_level, e.teacher_notes, e.is_billed, 
+              (SELECT EXISTS(
+                   SELECT 1 FROM tuition_bills b 
+                   WHERE b.student_id = $1 
+                     AND s.session_date >= b.start_date 
+                     AND s.session_date <= b.end_date 
+                     AND b.is_paid = true
+              )) as is_paid 
        FROM sessions s
        LEFT JOIN session_evaluations e ON s.id = e.session_id AND e.student_id = $1
        WHERE s.is_published = true 

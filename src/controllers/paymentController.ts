@@ -49,10 +49,24 @@ export const getBills = async (req: any, res: any) => {
 
 // 4. Tạo phiếu thu mới & Khóa buổi học (MỚI)
 export const createBill = async (req: any, res: any) => {
-  const { student_id, start_date, end_date, total_amount, bill_note } = req.body;
+  const { student_id, start_date, end_date, bill_note } = req.body;
   try {
-    await pool.query(`INSERT INTO tuition_bills (student_id, start_date, end_date, total_amount, bill_note) VALUES ($1, $2, $3, $4, $5)`, [student_id, start_date, end_date, total_amount, bill_note]);
-    await pool.query(`UPDATE session_evaluations SET is_billed = true FROM sessions WHERE session_evaluations.session_id = sessions.id AND session_evaluations.student_id = $1 AND sessions.session_date >= $2 AND sessions.session_date <= $3`, [student_id, start_date, end_date]);
+    const calcRes = await pool.query(`
+      SELECT COALESCE(SUM(c.tuition_fee), 0) as calculated_total
+      FROM attendance a
+      JOIN classes c ON a.class_id = c.id
+      WHERE a.student_id = $1 
+        AND a.attendance_date >= $2 
+        AND a.attendance_date <= $3
+        AND a.status = 'PRESENT'
+    `, [student_id, start_date, end_date]);
+    
+    const total_amount = parseInt(calcRes.rows[0].calculated_total) || 0;
+
+    await pool.query(
+      `INSERT INTO tuition_bills (student_id, start_date, end_date, total_amount, bill_note, is_paid) VALUES ($1, $2, $3, $4, $5, false)`, 
+      [student_id, start_date, end_date, total_amount, bill_note]
+    );
     res.json({ message: 'Tạo phiếu thành công!' });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 };
@@ -72,18 +86,7 @@ export const markBillAsPaid = async (req: any, res: any) => {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       };
       
-      const startDateStr = formatDate(bill.start_date);
-      const endDateStr = formatDate(bill.end_date);
-
-      await pool.query(
-        `UPDATE session_evaluations SET is_paid = true FROM sessions 
-         WHERE session_evaluations.session_id = sessions.id 
-         AND session_evaluations.student_id = $1 
-         AND sessions.session_date >= $2 
-         AND sessions.session_date <= $3`,
-        [bill.student_id, startDateStr, endDateStr]
-      );
-    }
+      }
     res.json({ message: 'Đã xác nhận thanh toán!' });
   } catch (err: any) { 
     res.status(500).json({ error: err.message }); 
