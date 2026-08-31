@@ -282,9 +282,9 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
     
     // 1. Tạo buổi học
     const sessionRes = await client.query(
-      `INSERT INTO sessions (class_id, session_date, start_time, end_time, content) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [id, session_date, start_time, end_time, content]
+      `INSERT INTO sessions (class_id, session_date, start_time, content) 
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [id, session_date, start_time, content]
     );
     const session = sessionRes.rows[0];
 
@@ -336,8 +336,8 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
     // 3. Tự động sinh danh sách điểm danh với status = 'PRESENT'
     for (const member of membersRes.rows) {
       await client.query(
-        `INSERT INTO attendance (session_id, student_id, status) VALUES ($1, $2, 'PRESENT')`,
-        [session.id, member.student_id]
+        `INSERT INTO attendance (class_id, attendance_date, student_id, status) VALUES ($1, $2, $3, 'PRESENT')`,
+        [session.class_id, session.session_date, member.student_id]
       );
     }
     

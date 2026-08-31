@@ -104,7 +104,7 @@ export const addExamScores = async (req: any, res: any) => {
       
       // Tìm phiếu thu CHƯA THANH TOÁN gần nhất của học sinh đó
       const billRes = await pool.query(
-        `SELECT id, exam_scores FROM tuition_bills 
+        `SELECT id FROM tuition_bills 
          WHERE student_id = $1 AND is_paid = false 
          ORDER BY created_at DESC LIMIT 1`,
         [student_id]
@@ -112,15 +112,9 @@ export const addExamScores = async (req: any, res: any) => {
 
       if (billRes.rows.length > 0) {
         const bill = billRes.rows[0];
-        // Đảm bảo exam_scores là mảng
-        let currentScores = Array.isArray(bill.exam_scores) ? bill.exam_scores : (bill.exam_scores ? JSON.parse(bill.exam_scores) : []);
-        
-        currentScores.push({ exam_title, score });
-
-        await pool.query(
-          `UPDATE tuition_bills SET exam_scores = $1::jsonb WHERE id = $2`,
-          [JSON.stringify(currentScores), bill.id]
-        );
+        // Production schema does NOT have exam_scores column.
+        // Hotfix: skip updating to avoid 500 runtime error.
+        console.warn('Skipping exam_scores update since column does not exist on production tuition_bills');
       }
     }
 
