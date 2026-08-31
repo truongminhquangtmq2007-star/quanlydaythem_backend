@@ -52,13 +52,21 @@ export const createBill = async (req: any, res: any) => {
   const { student_id, start_date, end_date, bill_note } = req.body;
   try {
     const calcRes = await pool.query(`
-      SELECT COALESCE(SUM(c.tuition_fee), 0) as calculated_total
-      FROM attendance a
-      JOIN classes c ON a.class_id = c.id
-      WHERE a.student_id = $1 
-        AND a.attendance_date >= $2 
-        AND a.attendance_date <= $3
-        AND a.status = 'PRESENT'
+      
+      SELECT COALESCE(SUM(fee), 0) as calculated_total
+      FROM (
+        SELECT DISTINCT a.class_id, a.attendance_date, c.tuition_fee as fee
+        FROM attendance a
+        JOIN sessions s ON a.class_id = s.class_id AND a.attendance_date = s.session_date
+        JOIN enrollments e ON e.student_id = a.student_id AND e.class_id = a.class_id
+        JOIN classes c ON a.class_id = c.id
+        WHERE a.student_id = $1 
+          AND a.attendance_date >= $2 
+          AND a.attendance_date <= $3
+          AND a.status = 'PRESENT'
+          AND s.is_published = true
+      ) as valid_sessions
+    
     `, [student_id, start_date, end_date]);
     
     const total_amount = parseInt(calcRes.rows[0].calculated_total) || 0;
@@ -143,11 +151,14 @@ export const getBillInvoice = async (req: any, res: any) => {
     // Lấy các buổi đã xác nhận (có đánh giá / điểm danh hợp lệ)
     // Business rule: không tính session nháp (is_published=false nếu có), chỉ lấy có mặt hoặc vắng có phép
     const sessionsRes = await pool.query(`
-      SELECT s.session_date, s.start_time, c.class_name, a.status
+      
+      SELECT DISTINCT s.session_date, s.start_time, c.class_name, a.status, a.notes as absent_reason, s.content
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
+      JOIN enrollments e ON e.student_id = $1 AND e.class_id = s.class_id
       JOIN attendance a ON a.class_id = s.class_id AND a.attendance_date = s.session_date AND a.student_id = $1
       WHERE s.session_date >= $2 AND s.session_date <= $3
+      AND s.is_published = true
       ORDER BY s.session_date ASC`, 
       [bill.student_id, bill.start_date, bill.end_date]);
 
@@ -159,14 +170,19 @@ export const previewBill = async (req: any, res: any) => {
   const { student_id, start_date, end_date } = req.query;
   try {
     const calcRes = await pool.query(`
-      SELECT c.class_name, a.attendance_date, c.tuition_fee
+      
+      SELECT DISTINCT c.class_name, a.attendance_date, c.tuition_fee
       FROM attendance a
+      JOIN sessions s ON a.class_id = s.class_id AND a.attendance_date = s.session_date
+      JOIN enrollments e ON e.student_id = a.student_id AND e.class_id = a.class_id
       JOIN classes c ON a.class_id = c.id
       WHERE a.student_id = $1 
         AND a.attendance_date >= $2 
         AND a.attendance_date <= $3
         AND a.status = 'PRESENT'
+        AND s.is_published = true
       ORDER BY a.attendance_date ASC
+    
     `, [student_id, start_date, end_date]);
     
     const total = calcRes.rows.reduce((sum, row) => sum + row.tuition_fee, 0);

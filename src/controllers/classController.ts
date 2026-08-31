@@ -328,19 +328,7 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
       // KHÔNG rollback session, chỉ log lỗi
     }
 
-    // 2. Lấy danh sách học sinh đang có trong lớp
-    const membersRes = await client.query(
-      `SELECT student_id FROM enrollments WHERE class_id = $1 AND status = 'ACTIVE'`,
-      [id]
-    );
-
-    // 3. Tự động sinh danh sách điểm danh với status = 'PRESENT'
-    for (const member of membersRes.rows) {
-      await client.query(
-        `INSERT INTO attendance (class_id, attendance_date, student_id, status) VALUES ($1, $2, $3, 'PRESENT')`,
-        [session.class_id, session.session_date, member.student_id]
-      );
-    }
+    // Đã gỡ bỏ logic tự động sinh điểm danh PRESENT (Hotfix 3.2)
     
   } catch (error) {
     await client.query('ROLLBACK');
