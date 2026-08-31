@@ -36,9 +36,16 @@ export const getClass = async (req: AuthRequest, res: Response): Promise<void> =
   try {
     const { id } = req.params;
     const user = req.user;
-    const result = await pool.query('SELECT * FROM classes WHERE id = $1', [id]);
+    
+    let result;
+    if (user?.role === 'ADMIN') {
+        result = await pool.query('SELECT * FROM classes WHERE id = $1', [id]);
+    } else {
+        result = await pool.query('SELECT * FROM classes WHERE id = $1 AND teacher_id = $2', [id, user?.id]);
+    }
+
     if (result.rows.length === 0) {
-      res.status(404).json({ message: "Không tìm thấy lớp học" });
+      res.status(404).json({ message: "Không tìm thấy lớp học hoặc bạn không có quyền truy cập" });
       return;
     }
     const classData = result.rows[0];
@@ -209,7 +216,17 @@ export const getClassSessions = async (req: AuthRequest, res: Response): Promise
 export const getSessionAttendance = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params; // session_id
-    // 1. Get session info
+    const user = req.user;
+    
+    // Check ownership
+    if (user?.role === 'TEACHER') {
+        const check = await pool.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [id, user.id]);
+        if (check.rows.length === 0) {
+            res.status(403).json({ message: "Bạn không có quyền truy cập điểm danh này" });
+            return;
+        }
+    }
+
     const sessionRes = await pool.query('SELECT class_id, session_date FROM sessions WHERE id = $1', [id]);
     if (sessionRes.rows.length === 0) {
       res.status(404).json({ message: "Không tìm thấy buổi học" });
@@ -266,7 +283,7 @@ export const addMember = async (req: AuthRequest, res: Response): Promise<void> 
 // POST /api/classes/:id/sessions
 export const createSession = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params; // class_id
-  const { session_date, start_time, end_time, content } = req.body;
+  const { session_date, start_time, end_time, content, homework } = req.body;
   
   const client = await pool.connect();
   try {
@@ -284,12 +301,13 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
     
     // 1. Tạo buổi học
     const sessionRes = await client.query(
-      `INSERT INTO sessions (class_id, session_date, start_time, content) 
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [id, session_date, start_time, content]
+      `INSERT INTO sessions (class_id, session_date, start_time, content, homework, is_published) 
+       VALUES ($1, $2, $3, $4, $5, false) RETURNING *`,
+      [id, session_date, start_time || '18:00', content || null, homework || null]
     );
     const session = sessionRes.rows[0];
-    // Google Calendar Sync
+
+    // Google Calendar Sync (optional)
     try {
       const teacherId = (req as any).user?.id;
       if (teacherId) {
@@ -325,12 +343,9 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
       }
     } catch (googleErr) {
       console.error("Lỗi đồng bộ Google Calendar khi tạo buổi học:", googleErr);
-      // KHÔNG rollback session, chỉ log lỗi
     }
 
-    // Đã gỡ bỏ logic tự động sinh điểm danh PRESENT (Hotfix 3.2)
-    
-  await client.query('COMMIT');
+    await client.query('COMMIT');
 
     res.status(201).json({
       message: "Tạo buổi học thành công",
@@ -351,9 +366,17 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
 // PUT /api/sessions/:id/attendance (Được định tuyến qua classRoutes hoặc sessionRoutes)
 export const updateAttendance = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params; // session_id
-  const { student_id, status, note } = req.body;
+  const { student_id, status, note, absent_reason } = req.body;
   try {
-    // 1. Lấy thông tin session
+    const user = req.user;
+    // Check ownership
+    if (user?.role === 'TEACHER') {
+        const check = await pool.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [id, user.id]);
+        if (check.rows.length === 0) {
+            res.status(403).json({ message: "Bạn không có quyền điểm danh lớp này" });
+            return;
+        }
+    }
     const sessionRes = await pool.query('SELECT class_id, session_date FROM sessions WHERE id = $1', [id]);
     if (sessionRes.rows.length === 0) {
       res.status(404).json({ message: "Không tìm thấy buổi học" });

@@ -10,17 +10,17 @@ import {
   getClassesForStudent
 } from '../controllers/enrollmentController';
 
-import { verifyToken } from '../middleware/authMiddleware';
+import { verifyToken, isTeacherOrAdmin } from '../middleware/authMiddleware';
 
 const router = Router();
 
 // 2. Định nghĩa các đường dẫn (Routes) - Đảm bảo tất cả đều có lớp khiên verifyToken
-router.get('/', verifyToken, getEnrollments);
-router.post('/', verifyToken, enrollStudent); // Chỉ giữ lại 1 cổng POST
-router.put('/:id', verifyToken, updateEnrollmentStatus);
-router.delete('/:id', verifyToken, deleteEnrollment);
+router.get('/', verifyToken, isTeacherOrAdmin, getEnrollments);
+router.post('/', verifyToken, isTeacherOrAdmin, enrollStudent); // Chỉ giữ lại 1 cổng POST
+router.put('/:id', verifyToken, isTeacherOrAdmin, updateEnrollmentStatus);
+router.delete('/:id', verifyToken, isTeacherOrAdmin, deleteEnrollment);
 
-router.get('/:class_id', verifyToken, getStudentsInClass); 
+router.get('/:class_id', verifyToken, isTeacherOrAdmin, getStudentsInClass); 
 router.get('/student/:student_id', verifyToken, getClassesForStudent);
 
 export default router;

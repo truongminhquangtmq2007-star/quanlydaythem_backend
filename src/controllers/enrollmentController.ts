@@ -1,16 +1,32 @@
 import { Request, Response } from 'express';
 import pool from '../db';
+import { AuthRequest } from '../middleware/authMiddleware';
 
 // 1. Xem danh sách đã xếp lớp (GET) - Dùng JOIN để lấy tên thật thay vì chỉ lấy ID
-export const getEnrollments = async (req: Request, res: Response) => {
+export const getEnrollments = async (req: AuthRequest, res: Response) => {
   try {
-    const query = `
-      SELECT e.id, s.full_name, c.class_name, e.enrollment_date, e.status
-      FROM enrollments e
-      JOIN students s ON e.student_id = s.id
-      JOIN classes c ON e.class_id = c.id
-    `;
-    const result = await pool.query(query);
+    const user = req.user;
+    let query: string;
+    let params: any[] = [];
+
+    if (user?.role === 'ADMIN') {
+      query = `
+        SELECT e.id, s.full_name, c.class_name, e.enrollment_date, e.status
+        FROM enrollments e
+        JOIN students s ON e.student_id = s.id
+        JOIN classes c ON e.class_id = c.id
+      `;
+    } else {
+      query = `
+        SELECT e.id, s.full_name, c.class_name, e.enrollment_date, e.status
+        FROM enrollments e
+        JOIN students s ON e.student_id = s.id
+        JOIN classes c ON e.class_id = c.id
+        WHERE c.teacher_id = $1
+      `;
+      params = [user?.id];
+    }
+    const result = await pool.query(query, params);
     res.status(200).json(result.rows);
   } catch (error) {
     console.error("Lỗi lấy danh sách ghi danh:", error);
@@ -19,9 +35,18 @@ export const getEnrollments = async (req: Request, res: Response) => {
 };
 
 // 2. Ghi danh học sinh vào lớp (POST)
-export const enrollStudent = async (req: Request, res: Response): Promise<void> => {
+export const enrollStudent = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { class_id, student_id } = req.body;
+    const user = req.user;
+
+    if (user?.role === 'TEACHER') {
+      const checkClass = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [class_id, user.id]);
+      if (checkClass.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền thêm học sinh vào lớp này" });
+        return;
+      }
+    }
 
     // 1. THÊM BỘ LỌC KIỂM TRA TRÙNG LẶP
     const checkExist = await pool.query(
@@ -29,13 +54,11 @@ export const enrollStudent = async (req: Request, res: Response): Promise<void> 
       [class_id, student_id]
     );
 
-    // Nếu câu truy vấn trả về dữ liệu (> 0), nghĩa là học sinh đã ở trong lớp
     if (checkExist.rows.length > 0) {
       res.status(400).json({ message: '❌ Học sinh này đã có trong lớp rồi!' });
-      return; // Ngắt mạch, không chạy đoạn code thêm mới phía dưới nữa
+      return;
     }
 
-    // 2. Lệnh INSERT cũ của bạn giữ nguyên
     const result = await pool.query(
       'INSERT INTO enrollments (class_id, student_id) VALUES ($1, $2) RETURNING *',
       [class_id, student_id]
@@ -47,11 +70,24 @@ export const enrollStudent = async (req: Request, res: Response): Promise<void> 
     res.status(500).json({ message: 'Lỗi server' });
   }
 };
+
 // 3. Cập nhật trạng thái học tập (PUT)
-export const updateEnrollmentStatus = async (req: Request, res: Response): Promise<void> => {
+export const updateEnrollmentStatus = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { id } = req.params; // ID của lượt ghi danh, không phải ID học sinh
-    const { status } = req.body; // Ví dụ: "Bảo lưu", "Đã nghỉ", "Học online"
+    const { id } = req.params; // ID của lượt ghi danh
+    const { status } = req.body;
+    const user = req.user;
+
+    if (user?.role === 'TEACHER') {
+      const check = await pool.query(
+        'SELECT c.id FROM enrollments e JOIN classes c ON e.class_id = c.id WHERE e.id = $1 AND c.teacher_id = $2',
+        [id, user.id]
+      );
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền sửa thông tin xếp lớp này" });
+        return;
+      }
+    }
     
     const result = await pool.query(
       'UPDATE enrollments SET status = $1 WHERE id = $2 RETURNING *',
@@ -71,9 +107,21 @@ export const updateEnrollmentStatus = async (req: Request, res: Response): Promi
 };
 
 // 4. Hủy ghi danh (DELETE)
-export const deleteEnrollment = async (req: Request, res: Response): Promise<void> => {
+export const deleteEnrollment = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    const user = req.user;
+
+    if (user?.role === 'TEACHER') {
+      const check = await pool.query(
+        'SELECT c.id FROM enrollments e JOIN classes c ON e.class_id = c.id WHERE e.id = $1 AND c.teacher_id = $2',
+        [id, user.id]
+      );
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền xóa xếp lớp này" });
+        return;
+      }
+    }
     
     const result = await pool.query('DELETE FROM enrollments WHERE id = $1 RETURNING *', [id]);
     
@@ -88,11 +136,20 @@ export const deleteEnrollment = async (req: Request, res: Response): Promise<voi
     res.status(500).json({ message: "Lỗi máy chủ nội bộ" });
   }
 };
-// Lấy danh sách các lớp mà một học sinh đang học
-// Bổ sung hàm 1: Lấy danh sách học sinh trong một lớp (Dùng cho trang Chi tiết lớp)
-export const getStudentsInClass = async (req: Request, res: Response): Promise<void> => {
+
+// Lấy danh sách học sinh trong một lớp
+export const getStudentsInClass = async (req: AuthRequest, res: Response): Promise<void> => {
   const { class_id } = req.params;
+  const user = req.user;
   try {
+    if (user?.role === 'TEACHER') {
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [class_id, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền xem học sinh của lớp này" });
+        return;
+      }
+    }
+
     const result = await pool.query(
       `SELECT s.id, s.full_name, s.phone_number, e.enrollment_date 
        FROM students s
@@ -106,17 +163,29 @@ export const getStudentsInClass = async (req: Request, res: Response): Promise<v
   }
 };
 
-// Bổ sung hàm 2: Lấy danh sách lớp mà một học sinh đang học (Dùng cho Dropdown mục Học phí)
-export const getClassesForStudent = async (req: Request, res: Response): Promise<void> => {
+// Lấy danh sách lớp mà một học sinh đang học
+export const getClassesForStudent = async (req: AuthRequest, res: Response): Promise<void> => {
   const { student_id } = req.params;
+  const user = req.user;
   try {
-    const result = await pool.query(
-      `SELECT c.id, c.class_name 
-       FROM classes c
-       JOIN enrollments e ON c.id = e.class_id
-       WHERE e.student_id = $1`,
-      [student_id]
-    );
+    let result;
+    if (user?.role === 'TEACHER') {
+      result = await pool.query(
+        `SELECT c.id, c.class_name 
+         FROM classes c
+         JOIN enrollments e ON c.id = e.class_id
+         WHERE e.student_id = $1 AND c.teacher_id = $2`,
+        [student_id, user.id]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT c.id, c.class_name 
+         FROM classes c
+         JOIN enrollments e ON c.id = e.class_id
+         WHERE e.student_id = $1`,
+        [student_id]
+      );
+    }
     res.status(200).json(result.rows);
   } catch (error) {
     res.status(500).json({ message: 'Lỗi server', error });

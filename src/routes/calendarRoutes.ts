@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authGoogleCalendar, oauthCallback, syncEvent } from '../controllers/calendarController';
-import { verifyToken } from '../middleware/authMiddleware';
+import { verifyToken, isTeacherOrAdmin } from '../middleware/authMiddleware';
 import jwt from 'jsonwebtoken';
 
 const router = Router();
@@ -23,7 +23,7 @@ const verifyTokenFromQuery = (req: Request, res: Response, next: NextFunction) =
 
 router.get('/auth', verifyTokenFromQuery, authGoogleCalendar);
 router.get('/callback', oauthCallback);
-router.post('/sync-event', verifyToken, syncEvent);
+router.post('/sync-event', verifyToken, isTeacherOrAdmin, syncEvent);
 
 export default router;
 

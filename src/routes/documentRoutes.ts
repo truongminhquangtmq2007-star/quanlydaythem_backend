@@ -1,13 +1,13 @@
 
 import { Router } from 'express';
-import { verifyToken } from '../middleware/authMiddleware';
+import { verifyToken, isTeacherOrAdmin } from '../middleware/authMiddleware';
 import { addDocument, updateDocument, deleteDocument, getAllDocuments } from '../controllers/documentController';
 
 const router = Router();
 
-router.get('/', verifyToken, getAllDocuments);
-router.post('/', verifyToken, addDocument);
-router.put('/:id', verifyToken, updateDocument);
-router.delete('/:id', verifyToken, deleteDocument);
+router.get('/', verifyToken, isTeacherOrAdmin, getAllDocuments);
+router.post('/', verifyToken, isTeacherOrAdmin, addDocument);
+router.put('/:id', verifyToken, isTeacherOrAdmin, updateDocument);
+router.delete('/:id', verifyToken, isTeacherOrAdmin, deleteDocument);
 
 export default router;

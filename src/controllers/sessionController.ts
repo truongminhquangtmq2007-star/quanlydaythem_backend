@@ -16,6 +16,13 @@ export const getSessions = async (req: AuthRequest, res: Response): Promise<void
   try {
     let result;
     if (class_id) {
+      if (user?.role === 'TEACHER') {
+        const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [class_id, user.id]);
+        if (check.rows.length === 0) {
+          res.status(403).json({ message: "Không có quyền xem lịch của lớp này" });
+          return;
+        }
+      }
       result = await pool.query(
         `SELECT s.*, 
                 (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
@@ -23,14 +30,24 @@ export const getSessions = async (req: AuthRequest, res: Response): Promise<void
         [class_id]
       );
     } else {
-      result = await pool.query(
-        `SELECT s.*, c.class_name,
-                (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
-         FROM sessions s 
-         JOIN classes c ON s.class_id = c.id 
-         WHERE c.teacher_id = $1 ORDER BY s.session_date ASC`,
-        [user.id]
-      );
+      if (user?.role === 'ADMIN') {
+        result = await pool.query(
+          `SELECT s.*, c.class_name,
+                  (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
+           FROM sessions s 
+           JOIN classes c ON s.class_id = c.id 
+           ORDER BY s.session_date ASC`
+        );
+      } else {
+        result = await pool.query(
+          `SELECT s.*, c.class_name,
+                  (SELECT COUNT(*) FROM session_evaluations WHERE session_id = s.id) as eval_count
+           FROM sessions s 
+           JOIN classes c ON s.class_id = c.id 
+           WHERE c.teacher_id = $1 ORDER BY s.session_date ASC`,
+          [user?.id]
+        );
+      }
     }
     res.status(200).json(result.rows);
   } catch (error) {
@@ -44,6 +61,22 @@ export const upsertSession = async (req: AuthRequest, res: Response): Promise<vo
   const { id, class_id, session_date, start_time, content, homework } = req.body;
   
   try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+        let checkClassId = class_id;
+        if (id) {
+            const getSession = await pool.query('SELECT class_id FROM sessions WHERE id = $1', [id]);
+            if (getSession.rows.length > 0) checkClassId = getSession.rows[0].class_id;
+        }
+        if (checkClassId) {
+            const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền sửa lớp này" });
+                return;
+            }
+        }
+    }
+
     let result;
     if (id) {
       result = await pool.query(
@@ -71,6 +104,14 @@ export const upsertSession = async (req: AuthRequest, res: Response): Promise<vo
 export const publishSessions = async (req: AuthRequest, res: Response): Promise<void> => {
   const { class_id } = req.body; 
   try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+        const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [class_id, user.id]);
+        if (check.rows.length === 0) {
+            res.status(403).json({ message: "Không có quyền sửa lớp này" });
+            return;
+        }
+    }
     // Chốt toàn bộ các bản nháp của lớp đang được chọn
     await pool.query(
       `UPDATE sessions SET is_published = true WHERE class_id = $1`,
@@ -86,6 +127,14 @@ export const publishSessions = async (req: AuthRequest, res: Response): Promise<
 export const deleteSession = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
   try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+        const check = await pool.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [id, user.id]);
+        if (check.rows.length === 0) {
+            res.status(403).json({ message: "Không có quyền xóa session này" });
+            return;
+        }
+    }
     await pool.query('DELETE FROM sessions WHERE id = $1', [id]);
     res.status(200).json({ message: 'Đã xóa buổi học' });
   } catch (error) {
@@ -124,7 +173,15 @@ export const getPublishedSessions = async (req: AuthRequest, res: Response): Pro
 // 5. Lấy danh sách đánh giá của 1 buổi học cụ thể
 export const getEvaluations = async (req: AuthRequest, res: Response): Promise<void> => {
   const { session_id } = req.query;
+  const user = req.user;
   try {
+    if (user?.role === 'TEACHER') {
+      const check = await pool.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [session_id, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền xem đánh giá này" });
+        return;
+      }
+    }
     const result = await pool.query(
       `SELECT e.*, s.full_name as student_name 
        FROM session_evaluations e 
@@ -142,7 +199,15 @@ export const getEvaluations = async (req: AuthRequest, res: Response): Promise<v
 // 6. Lưu điểm danh & nhận xét cho từng học sinh
 export const saveEvaluation = async (req: AuthRequest, res: Response): Promise<void> => {
   const { session_id, student_id, is_present, focus_level, teacher_notes } = req.body;
+  const user = req.user;
   try {
+    if (user?.role === 'TEACHER') {
+      const check = await pool.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [session_id, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền lưu đánh giá cho buổi học này" });
+        return;
+      }
+    }
     // Kiểm tra xem bé này đã được chấm điểm trong buổi này chưa
     const check = await pool.query(
       `SELECT id FROM session_evaluations WHERE session_id = $1 AND student_id = $2`, 

@@ -9,6 +9,21 @@ import { AuthRequest } from '../middleware/authMiddleware';
 export const getStudentTopics = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
+        const user = req.user;
+
+        if (user?.role === 'TEACHER') {
+          const check = await pool.query(
+            `SELECT 1 FROM students s
+             LEFT JOIN enrollments e ON s.id = e.student_id
+             LEFT JOIN classes c ON e.class_id = c.id
+             WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`,
+            [id, user.id]
+          );
+          if (check.rows.length === 0) {
+            res.status(403).json({ message: "Không có quyền xem dữ liệu của học sinh này" });
+            return;
+          }
+        }
 
         // Thử query bảng thật trước
         try {

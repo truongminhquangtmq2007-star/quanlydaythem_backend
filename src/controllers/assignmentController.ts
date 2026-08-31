@@ -6,6 +6,15 @@ import { AuthRequest } from '../middleware/authMiddleware';
 export const createAssignment = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { title, class_id, document_id, due_at } = req.body;
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [class_id, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền giao bài cho lớp này" });
+        return;
+      }
+    }
+
     const result = await pool.query(
       `INSERT INTO assignments (title, class_id, document_id, due_at) 
        VALUES ($1, $2, $3, $4) RETURNING *`,
@@ -23,9 +32,18 @@ export const createAssignment = async (req: AuthRequest, res: Response): Promise
 };
 
 // GET /api/classes/:id/assignments
-export const getClassAssignments = async (req: Request, res: Response): Promise<void> => {
+export const getClassAssignments = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền xem bài tập của lớp này" });
+        return;
+      }
+    }
+
     const result = await pool.query(
       `SELECT a.*, d.category, f.name as folder_name 
        FROM assignments a
