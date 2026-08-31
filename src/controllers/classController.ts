@@ -217,12 +217,14 @@ export const getSessionAttendance = async (req: AuthRequest, res: Response): Pro
     }
     const { class_id, session_date } = sessionRes.rows[0];
 
-    // 2. Query attendance
+    // 2. Query all enrolled students, left join attendance
     const result = await pool.query(
-      `SELECT a.*, s.full_name, s.id as student_code
-       FROM attendance a 
-       JOIN students s ON a.student_id = s.id 
-       WHERE a.class_id = $1 AND a.attendance_date = $2 ORDER BY s.full_name`,
+      `SELECT e.student_id, s.full_name, s.id as student_code, a.id as attendance_id, a.status, a.notes, a.absent_reason
+       FROM enrollments e
+       JOIN students s ON e.student_id = s.id
+       LEFT JOIN attendance a ON a.student_id = e.student_id AND a.class_id = $1 AND a.attendance_date = $2
+       WHERE e.class_id = $1 AND e.status = 'ACTIVE'
+       ORDER BY s.full_name`,
       [class_id, session_date]
     );
     res.json(result.rows);
@@ -287,7 +289,6 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
       [id, session_date, start_time, content]
     );
     const session = sessionRes.rows[0];
-
     // Google Calendar Sync
     try {
       const teacherId = (req as any).user?.id;
@@ -341,8 +342,6 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
       );
     }
     
-    await client.query('COMMIT');
-    res.status(201).json({ message: "Tạo buổi học thành công", session });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error(error);

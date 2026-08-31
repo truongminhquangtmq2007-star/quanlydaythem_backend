@@ -46,7 +46,7 @@ export const getStudents = async (req: AuthRequest, res: Response): Promise<void
     let count = 1;
     
     if (req.user && req.user.role === 'TEACHER') {
-        query += ' JOIN enrollments e ON s.id = e.student_id JOIN classes c ON e.class_id = c.id WHERE c.teacher_id = $' + count + ' AND (s.is_active = TRUE OR s.is_active IS NULL) ';
+        query += ' LEFT JOIN enrollments e ON s.id = e.student_id LEFT JOIN classes c ON e.class_id = c.id WHERE (c.teacher_id = $' + count + ' OR s.teacher_id = $' + count + ') AND (s.is_active = TRUE OR s.is_active IS NULL) ';
         values.push(req.user.id);
         count++;
     } else {

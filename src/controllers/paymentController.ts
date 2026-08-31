@@ -123,3 +123,50 @@ export const addExamScores = async (req: any, res: any) => {
     res.status(500).json({ error: err.message });
   }
 };
+export const getBillInvoice = async (req: any, res: any) => {
+  const { id } = req.params;
+  try {
+    const billRes = await pool.query(`
+      SELECT b.*, s.full_name, s.phone_number, s.parent_phone 
+      FROM tuition_bills b 
+      JOIN students s ON b.student_id = s.id 
+      WHERE b.id = $1`, [id]);
+      
+    if (billRes.rows.length === 0) {
+      return res.status(404).json({ message: "Không tìm thấy hóa đơn" });
+    }
+    const bill = billRes.rows[0];
+
+    // Lấy các buổi đã xác nhận (có đánh giá / điểm danh hợp lệ)
+    // Business rule: không tính session nháp (is_published=false nếu có), chỉ lấy có mặt hoặc vắng có phép
+    const sessionsRes = await pool.query(`
+      SELECT s.session_date, s.start_time, c.class_name, a.status
+      FROM sessions s
+      JOIN classes c ON s.class_id = c.id
+      JOIN attendance a ON a.class_id = s.class_id AND a.attendance_date = s.session_date AND a.student_id = $1
+      WHERE s.session_date >= $2 AND s.session_date <= $3
+      ORDER BY s.session_date ASC`, 
+      [bill.student_id, bill.start_date, bill.end_date]);
+
+    res.json({ bill, sessions: sessionsRes.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+};
+
+export const previewBill = async (req: any, res: any) => {
+  const { student_id, start_date, end_date } = req.query;
+  try {
+    const calcRes = await pool.query(`
+      SELECT c.class_name, a.attendance_date, c.tuition_fee
+      FROM attendance a
+      JOIN classes c ON a.class_id = c.id
+      WHERE a.student_id = $1 
+        AND a.attendance_date >= $2 
+        AND a.attendance_date <= $3
+        AND a.status = 'PRESENT'
+      ORDER BY a.attendance_date ASC
+    `, [student_id, start_date, end_date]);
+    
+    const total = calcRes.rows.reduce((sum, row) => sum + row.tuition_fee, 0);
+    res.json({ total_amount: total, sessions: calcRes.rows });
+  } catch(err: any) { res.status(500).json({ error: err.message }); }
+};
