@@ -250,7 +250,36 @@ export const getBillInvoice = async (req: AuthRequest, res: Response): Promise<v
       ORDER BY s.session_date ASC`, 
       [bill.student_id, bill.start_date, bill.end_date, teacherId]);
 
-    res.json({ bill, sessions: sessionsRes.rows });
+    // Query available assessments in the period for the student (Teacher isolated)
+    let assessments: any[] = [];
+    try {
+      const assessmentsRes = await pool.query(`
+        SELECT DISTINCT
+          es.id,
+          es.document_id,
+          COALESCE(d.title, 'Bài kiểm tra') as title,
+          es.total_score as score,
+          es.submitted_at as assessment_date,
+          COALESCE(d.category, 'EXAM') as category,
+          c.class_name
+        FROM exam_submissions es
+        JOIN documents d ON es.document_id = d.id
+        LEFT JOIN folders f ON d.folder_id = f.id
+        LEFT JOIN classes c ON f.class_id = c.id
+        JOIN students s ON es.student_id = s.id
+        WHERE es.student_id = $1
+          AND es.submitted_at::date >= $2::date
+          AND es.submitted_at::date <= $3::date
+          AND ($4::int IS NULL OR d.teacher_id = $4 OR c.teacher_id = $4 OR s.teacher_id = $4)
+        ORDER BY es.submitted_at ASC
+      `, [bill.student_id, bill.start_date, bill.end_date, teacherId]);
+      assessments = assessmentsRes.rows;
+    } catch (assessErr) {
+      console.warn("Lưu ý: Không thể lấy assessments:", assessErr);
+      assessments = [];
+    }
+
+    res.json({ bill, sessions: sessionsRes.rows, available_assessments: assessments });
   } catch (err: any) { 
     console.error("Lỗi getBillInvoice:", err);
     res.status(500).json({ error: err.message }); 
