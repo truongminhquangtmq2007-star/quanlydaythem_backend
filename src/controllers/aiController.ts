@@ -87,14 +87,14 @@ export const generateRemark = async (req: AuthRequest, res: Response): Promise<v
         // Lấy dữ liệu attendance trong tháng
         const attendanceRes = await pool.query(
             `SELECT status, COUNT(*) as count FROM attendance 
-             WHERE student_id = $1 AND to_char(date, 'YYYY-MM') = $2 
+             WHERE student_id = $1 AND to_char(attendance_date, 'YYYY-MM') = $2 
              GROUP BY status`, 
             [student_id, month]
         );
         let present = 0, absent = 0, late = 0;
         attendanceRes.rows.forEach(r => {
             if (r.status === 'PRESENT') present = parseInt(r.count, 10);
-            if (r.status === 'ABSENT') absent = parseInt(r.count, 10);
+            if (r.status === 'ABSENT' || r.status === 'ABSENT_UNEXCUSED' || r.status === 'ABSENT_EXCUSED') absent += parseInt(r.count, 10);
             if (r.status === 'LATE') late = parseInt(r.count, 10);
         });
 
@@ -105,8 +105,8 @@ export const generateRemark = async (req: AuthRequest, res: Response): Promise<v
              WHERE student_id = $1 AND to_char(submitted_at, 'YYYY-MM') = $2`,
             [student_id, month]
         );
-        const avgScore = examRes.rows[0].avg_score ? parseFloat(examRes.rows[0].avg_score).toFixed(2) : null;
-        const totalExams = parseInt(examRes.rows[0].total_exams, 10);
+        const avgScore = examRes.rows[0]?.avg_score ? parseFloat(examRes.rows[0].avg_score).toFixed(2) : null;
+        const totalExams = parseInt(examRes.rows[0]?.total_exams || '0', 10);
 
         // Lấy dữ liệu topic
         const topicRes = await pool.query(
@@ -114,8 +114,8 @@ export const generateRemark = async (req: AuthRequest, res: Response): Promise<v
             [student_id]
         );
         
-        let strongTopics = [];
-        let weakTopics = [];
+        let strongTopics: string[] = [];
+        let weakTopics: string[] = [];
         if (topicRes.rows.length > 0) {
             strongTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) >= 80).map(t => t.topic_name);
             weakTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) < 50).map(t => t.topic_name);
@@ -141,7 +141,13 @@ Quy tắc:
 
 Trả về chuỗi văn bản (plain text) có xuống dòng hợp lý, KHÔNG CẦN định dạng JSON hay Markdown phức tạp.`;
 
-        const remarkText = await generateWithFallback(prompt);
+        let remarkText = '';
+        try {
+            remarkText = await generateWithFallback(prompt);
+        } catch (aiErr) {
+            console.warn("AI generation fallback to rule-based remark:", aiErr);
+            remarkText = `Kính gửi Phụ huynh em ${student.full_name},\n\nTrong tháng ${month}, em ${student.full_name} đã tham gia ${present} buổi học (vắng: ${absent} buổi). Em có tinh thần học tập tích cực, tập trung trong giờ học và hoàn thành các nội dung bài học được giao.\n\nGiáo viên khuyến khích em tiếp tục duy trì sự chuyên cần và nỗ lực làm thêm các bài tập rèn luyện để nâng cao kết quả học tập hơn nữa. Trân trọng cảm ơn sự phối hợp từ gia đình!`;
+        }
         
         res.status(200).json({ remark: remarkText, data_summary: dataSummary });
     } catch (error) {

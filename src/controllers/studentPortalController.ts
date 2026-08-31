@@ -93,22 +93,24 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
             upcomingSessions = scheduleRes.rows;
         } catch(e) { console.error(e); }
 
-        // Đề thi/Bài tập
+        // Đề thi / Bài tập / Tài liệu được giao
         let assignments = [];
         try {
             const docsRes = await pool.query(
-                `SELECT d.id, d.title, f.category AS type, c.class_name
-  FROM documents d
-  JOIN folders f ON d.folder_id = f.id
-  JOIN classes c ON f.class_id = c.id
-  JOIN enrollments e ON e.class_id = c.id
-  WHERE e.student_id = $1
-                ORDER BY d.uploaded_at DESC
-                LIMIT 5`,
+                `SELECT a.id as assignment_id, d.id as document_id, COALESCE(a.title, d.title) as title, 
+                        d.file_url, d.category as type, c.class_name, a.due_at, a.description as session_info,
+                        a.created_at
+                 FROM assignments a
+                 JOIN documents d ON a.document_id = d.id
+                 JOIN classes c ON a.class_id = c.id
+                 JOIN enrollments e ON e.class_id = c.id
+                 WHERE e.student_id = $1 AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+                 ORDER BY a.created_at DESC
+                 LIMIT 5`,
                 [studentId]
             );
             assignments = docsRes.rows;
-        } catch(e) { console.error(e); }
+        } catch(e) { console.error("Lỗi lấy assignments:", e); }
 
         res.status(200).json({
             profile,
@@ -131,7 +133,6 @@ export const getSchedule = async (req: AuthRequest, res: Response): Promise<void
             return;
         }
 
-        // SCHEMA THẬT: classes dùng "class_name" không phải "name". Không có "subject".
         const query = `
             SELECT s.id, s.session_date, s.start_time, c.class_name
             FROM sessions s
@@ -157,15 +158,15 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
             return;
         }
 
-        // SCHEMA THẬT: classes dùng "class_name". documents dùng "uploaded_at", "category".
         const query = `
-            SELECT d.id, d.title, f.category AS type, d.file_url, d.uploaded_at AS created_at, c.class_name, NULL AS due_at
-  FROM documents d
-  JOIN folders f ON d.folder_id = f.id
-  JOIN classes c ON f.class_id = c.id
-  JOIN enrollments e ON e.class_id = c.id
-  WHERE e.student_id = $1
-            ORDER BY d.uploaded_at DESC
+            SELECT a.id, COALESCE(a.title, d.title) as title, d.category AS type, d.file_url,
+                   a.created_at, c.class_name, a.due_at, a.description as session_info
+            FROM assignments a
+            JOIN documents d ON a.document_id = d.id
+            JOIN classes c ON a.class_id = c.id
+            JOIN enrollments e ON e.class_id = c.id
+            WHERE e.student_id = $1 AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+            ORDER BY a.created_at DESC
             LIMIT 20
         `;
         const result = await pool.query(query, [studentId]);

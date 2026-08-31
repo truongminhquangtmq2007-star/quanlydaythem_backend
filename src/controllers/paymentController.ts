@@ -211,10 +211,17 @@ export const getBillInvoice = async (req: AuthRequest, res: Response): Promise<v
     }
 
     const billRes = await pool.query(`
-      SELECT b.*, s.full_name, s.phone_number, s.parent_phone 
+      SELECT b.*, s.full_name, s.phone_number, s.school_name,
+             COALESCE(c.class_name, 'Lớp học') as class_name,
+             COALESCE(c.tuition_fee, 0) as tuition_fee,
+             u.full_name as teacher_name
       FROM tuition_bills b 
       JOIN students s ON b.student_id = s.id 
-      WHERE b.id = $1`, [id]);
+      LEFT JOIN enrollments e ON e.student_id = s.id
+      LEFT JOIN classes c ON e.class_id = c.id
+      LEFT JOIN users u ON c.teacher_id = u.id
+      WHERE b.id = $1
+      ORDER BY c.id ASC LIMIT 1`, [id]);
       
     if (billRes.rows.length === 0) {
       res.status(404).json({ message: "Không tìm thấy hóa đơn" });
@@ -223,20 +230,24 @@ export const getBillInvoice = async (req: AuthRequest, res: Response): Promise<v
     const bill = billRes.rows[0];
     const teacherId = user?.role === 'TEACHER' ? user.id : null;
 
+    // Requirement: SESSIONS as primary list source, then LEFT JOIN attendance
     const sessionsRes = await pool.query(`
-      SELECT DISTINCT s.session_date, s.start_time, c.class_name, a.status, COALESCE(a.absent_reason, a.notes) as absent_reason, s.content
+      SELECT DISTINCT s.session_date, s.start_time, c.class_name, c.tuition_fee,
+             a.status, COALESCE(a.absent_reason, a.notes) as absent_reason, s.content
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
       JOIN enrollments e ON e.student_id = $1 AND e.class_id = s.class_id
-      JOIN attendance a ON a.class_id = s.class_id AND a.attendance_date = s.session_date AND a.student_id = $1
+      LEFT JOIN attendance a ON a.class_id = s.class_id AND a.attendance_date = s.session_date AND a.student_id = $1
       WHERE s.session_date >= $2 AND s.session_date <= $3
-      AND s.is_published = true
-      AND ($4::int IS NULL OR c.teacher_id = $4)
+        AND ($4::int IS NULL OR c.teacher_id = $4)
       ORDER BY s.session_date ASC`, 
       [bill.student_id, bill.start_date, bill.end_date, teacherId]);
 
     res.json({ bill, sessions: sessionsRes.rows });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { 
+    console.error("Lỗi getBillInvoice:", err);
+    res.status(500).json({ error: err.message }); 
+  }
 };
 
 export const previewBill = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -260,21 +271,29 @@ export const previewBill = async (req: AuthRequest, res: Response): Promise<void
     const teacherId = user?.role === 'TEACHER' ? user.id : null;
 
     const calcRes = await pool.query(`
-      SELECT DISTINCT c.class_name, a.attendance_date, c.tuition_fee
-      FROM attendance a
-      JOIN sessions s ON a.class_id = s.class_id AND a.attendance_date = s.session_date
-      JOIN enrollments e ON e.student_id = a.student_id AND e.class_id = a.class_id
-      JOIN classes c ON a.class_id = c.id
+      SELECT DISTINCT c.class_name, a.attendance_date, c.tuition_fee, a.status, s.content,
+             COALESCE(a.absent_reason, a.notes) as absent_reason
+      FROM sessions s
+      JOIN classes c ON s.class_id = c.id
+      JOIN enrollments e ON e.student_id = $1 AND e.class_id = s.class_id
+      JOIN attendance a ON a.class_id = s.class_id AND a.attendance_date = s.session_date AND a.student_id = $1
       WHERE a.student_id = $1 
         AND a.attendance_date >= $2 
         AND a.attendance_date <= $3
         AND a.status = 'PRESENT'
-        AND s.is_published = true
         AND ($4::int IS NULL OR c.teacher_id = $4)
       ORDER BY a.attendance_date ASC
     `, [student_id, start_date, end_date, teacherId]);
     
-    const total = calcRes.rows.reduce((sum: number, row: any) => sum + row.tuition_fee, 0);
-    res.json({ total_amount: total, sessions: calcRes.rows });
-  } catch(err: any) { res.status(500).json({ error: err.message }); }
+    const total = calcRes.rows.reduce((sum: number, row: any) => sum + Number(row.tuition_fee || 0), 0);
+    res.json({ 
+      total_amount: total, 
+      sessions: calcRes.rows, 
+      present_count: calcRes.rows.length,
+      tuition_fee: calcRes.rows[0]?.tuition_fee || 0 
+    });
+  } catch(err: any) { 
+    console.error("Lỗi previewBill:", err);
+    res.status(500).json({ error: err.message }); 
+  }
 };

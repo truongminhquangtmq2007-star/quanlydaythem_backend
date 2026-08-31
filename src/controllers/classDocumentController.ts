@@ -21,10 +21,10 @@ export const getAssignableDocuments = async (req: AuthRequest, res: Response): P
       SELECT d.id, d.title, d.category, d.folder_id, d.file_url, d.uploaded_at AS created_at, f.name AS folder_name, f.class_id AS folder_class_id
       FROM documents d
       LEFT JOIN folders f ON d.folder_id = f.id
-      WHERE ($2::int IS NULL OR d.teacher_id = $2)
+      WHERE ($1::int IS NULL OR d.teacher_id = $1)
       ORDER BY f.name NULLS FIRST, d.title
     `;
-    const result = await pool.query(query, [id, teacherId]);
+    const result = await pool.query(query, [teacherId]);
     
     res.status(200).json(result.rows);
   } catch (error) {
