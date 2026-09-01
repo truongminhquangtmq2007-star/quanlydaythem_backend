@@ -11,11 +11,10 @@ router.get('/', verifyToken, isTeacherOrAdmin, getSessions);
 router.get('/published', verifyToken, getPublishedSessions);
 
 router.post('/upsert', verifyToken, isTeacherOrAdmin, upsertSession);
+router.put('/:id', verifyToken, isTeacherOrAdmin, upsertSession);
 router.post('/publish', verifyToken, isTeacherOrAdmin, publishSessions);
 router.delete('/:id', verifyToken, isTeacherOrAdmin, deleteSession);
 
-// [ĐÃ SỬA] Đổi '/evaluations' thành '/evaluate' cho khớp với Frontend
-// [ĐÃ SỬA] Bổ sung verifyToken cho toàn bộ các API bên dưới
 router.get('/evaluations', verifyToken, isTeacherOrAdmin, getEvaluations);
 router.post('/evaluate', verifyToken, isTeacherOrAdmin, saveEvaluation);
 router.post('/mark-billed', verifyToken, isTeacherOrAdmin, markSessionsAsBilled);

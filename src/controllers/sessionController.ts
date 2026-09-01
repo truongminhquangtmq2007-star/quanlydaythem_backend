@@ -61,14 +61,15 @@ export const getSessions = async (req: AuthRequest, res: Response): Promise<void
 
 // 2. API Lưu Nháp / Cập nhật buổi học (ĐÃ GỌT LẠI CHO KHỚP DB)
 export const upsertSession = async (req: AuthRequest, res: Response): Promise<void> => {
-  const { id, class_id, session_date, start_time, content, homework } = req.body;
+  const sessionId = req.body.id || req.params.id;
+  const { class_id, session_date, start_time, end_time, content, homework } = req.body;
   
   try {
     const user = req.user;
     if (user?.role === 'TEACHER') {
         let checkClassId = class_id;
-        if (id) {
-            const getSession = await pool.query('SELECT class_id FROM sessions WHERE id = $1', [id]);
+        if (sessionId) {
+            const getSession = await pool.query('SELECT class_id FROM sessions WHERE id = $1', [sessionId]);
             if (getSession.rows.length > 0) checkClassId = getSession.rows[0].class_id;
         }
         if (checkClassId) {
@@ -81,21 +82,21 @@ export const upsertSession = async (req: AuthRequest, res: Response): Promise<vo
     }
 
     let result;
-    if (id) {
+    if (sessionId) {
       result = await pool.query(
         `UPDATE sessions 
          SET session_date=$1, start_time=$2, content=$3, homework=$4 
          WHERE id=$5 RETURNING *`,
-        [session_date, start_time, content, homework, id]
+        [session_date, start_time || '18:00', content || null, homework || null, sessionId]
       );
     } else {
       result = await pool.query(
         `INSERT INTO sessions (class_id, session_date, start_time, content, homework, is_published) 
          VALUES ($1, $2, $3, $4, $5, false) RETURNING *`,
-        [class_id, session_date, start_time, content, homework]
+        [class_id, session_date, start_time || '18:00', content || null, homework || null]
       );
     }
-    res.status(200).json({ message: 'Đã lưu nháp thành công!', session: result.rows[0] });
+    res.status(200).json({ message: 'Đã lưu buổi học thành công!', session: result.rows[0] });
   } catch (error) {
     console.error("Lỗi lưu buổi học:", error);
     res.status(500).json({ message: 'Lỗi server' });

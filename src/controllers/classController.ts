@@ -305,14 +305,24 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
   const { id } = req.params; // class_id
   const { session_date, start_time, end_time, content, homework } = req.body;
   
+  if (!session_date) {
+    res.status(400).json({ message: "Vui lòng chọn ngày học" });
+    return;
+  }
+
   const client = await pool.connect();
   try {
     const user = req.user;
     if (user?.role === 'TEACHER') {
-      const checkClassId = req.params.id;
-      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
       if (check.rows.length === 0) {
-        res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+        res.status(403).json({ message: "Bạn không có quyền quản lý lớp này hoặc lớp không tồn tại" });
+        return;
+      }
+    } else if (user?.role === 'ADMIN') {
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1', [id]);
+      if (check.rows.length === 0) {
+        res.status(404).json({ message: "Lớp học không tồn tại" });
         return;
       }
     }
@@ -327,7 +337,7 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
     );
     const session = sessionRes.rows[0];
 
-    // Google Calendar Sync (optional)
+    // Google Calendar Sync (optional, non-blocking)
     try {
       const teacherId = (req as any).user?.id;
       if (teacherId) {
@@ -348,17 +358,24 @@ export const createSession = async (req: AuthRequest, res: Response): Promise<vo
           );
           const attendees = emailsRes.rows.map(r => ({ email: r.email }));
           
+          const dateStr = session_date.includes('T') ? session_date.split('T')[0] : session_date;
+          const startClean = (start_time || '18:00').substring(0, 5) + ':00';
+          const endClean = (end_time || '19:30').substring(0, 5) + ':00';
+
           const event = await calendar.events.insert({
             calendarId: 'primary',
             requestBody: {
               summary: content || 'Lịch học',
-              start: { dateTime: session_date + 'T' + (start_time || '18:00') + ':00+07:00', timeZone: 'Asia/Ho_Chi_Minh' },
-              end: { dateTime: session_date + 'T' + (end_time || '19:30') + ':00+07:00', timeZone: 'Asia/Ho_Chi_Minh' },
+              start: { dateTime: `${dateStr}T${startClean}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+              end: { dateTime: `${dateStr}T${endClean}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
               attendees: attendees.length > 0 ? attendees : undefined
             }
           });
           
-          await client.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [event.data.id, session.id]);
+          if (event.data?.id) {
+            await client.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [event.data.id, session.id]);
+            session.google_event_id = event.data.id;
+          }
         }
       }
     } catch (googleErr) {
