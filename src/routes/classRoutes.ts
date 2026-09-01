@@ -6,6 +6,7 @@ import {
   deleteClass, 
   assignTeacher,
   addMember,
+  removeMember,
   createSession,
   updateAttendance,
   getClassMembers,
@@ -32,6 +33,7 @@ router.put('/:id/assign-teacher', verifyToken, isTeacherOrAdmin, assignTeacher);
 
 router.get('/:id/members', verifyToken, isTeacherOrAdmin, getClassMembers);
 router.post('/:id/members', verifyToken, isTeacherOrAdmin, addMember);
+router.delete('/:id/members/:studentId', verifyToken, isTeacherOrAdmin, removeMember);
 
 router.get('/:id/sessions', verifyToken, isTeacherOrAdmin, getClassSessions);
 router.post('/:id/sessions', verifyToken, isTeacherOrAdmin, createSession);

@@ -106,29 +106,45 @@ export const updateClass = async (req: AuthRequest, res: Response): Promise<void
 
 // 4. Xóa lớp học (DELETE)
 export const deleteClass = async (req: AuthRequest, res: Response): Promise<void> => {
+  const client = await pool.connect();
   try {
     const { id } = req.params;
     const user = req.user;
     if (user?.role === 'TEACHER') {
-        const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
+        const check = await client.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
         if (check.rows.length === 0) {
-            res.status(403).json({ message: "Bạn không có quyền xóa lớp này" });
+            res.status(403).json({ message: "Bạn không có quyền xóa lớp này hoặc lớp không tồn tại" });
+            return;
+        }
+    } else if (user?.role === 'ADMIN') {
+        const check = await client.query('SELECT id FROM classes WHERE id = $1', [id]);
+        if (check.rows.length === 0) {
+            res.status(404).json({ message: "Không tìm thấy lớp học" });
             return;
         }
     }
     
-    try { await pool.query('ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE'); } catch(e){}
-    try { await pool.query('UPDATE classes SET is_active = TRUE WHERE is_active IS NULL'); } catch(e){}
-
-    const result = await pool.query('UPDATE classes SET is_active = FALSE WHERE id = $1 RETURNING *', [id]);
+    await client.query('BEGIN');
+    
+    // Soft delete the class to keep historical data intact
+    const result = await client.query('UPDATE classes SET is_active = FALSE WHERE id = $1 RETURNING *', [id]);
     if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
       res.status(404).json({ message: "Không tìm thấy lớp học" });
       return;
     }
-    res.status(200).json({ message: "Đã xóa (ẩn) lớp học thành công" });
+
+    // Deactivate active enrollments in this class
+    await client.query("UPDATE enrollments SET status = 'INACTIVE' WHERE class_id = $1", [id]);
+
+    await client.query('COMMIT');
+    res.status(200).json({ message: "Đã xóa lớp học thành công" });
   } catch (error: any) {
+    await client.query('ROLLBACK');
     console.error('Lỗi xóa lớp:', error);
-    res.status(500).json({ message: "Lỗi máy chủ nội bộ", details: error.message });
+    res.status(500).json({ message: "Lỗi máy chủ nội bộ khi xóa lớp học" });
+  } finally {
+    client.release();
   }
 };
 
@@ -297,6 +313,43 @@ export const addMember = async (req: AuthRequest, res: Response): Promise<void> 
     }
     console.error(error);
     res.status(500).json({ message: "Lỗi server khi thêm học sinh" });
+  }
+};
+
+// DELETE /api/classes/:id/members/:studentId
+export const removeMember = async (req: AuthRequest, res: Response): Promise<void> => {
+  const { id, studentId } = req.params; // class_id, student_id
+  try {
+    const user = req.user;
+    if (user?.role === 'TEACHER') {
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Bạn không có quyền quản lý lớp này hoặc lớp không tồn tại" });
+        return;
+      }
+    } else if (user?.role === 'ADMIN') {
+      const check = await pool.query('SELECT id FROM classes WHERE id = $1', [id]);
+      if (check.rows.length === 0) {
+        res.status(404).json({ message: "Không tìm thấy lớp học" });
+        return;
+      }
+    }
+
+    const checkEnroll = await pool.query(
+      'SELECT id FROM enrollments WHERE class_id = $1 AND student_id = $2',
+      [id, studentId]
+    );
+    if (checkEnroll.rows.length === 0) {
+      res.status(404).json({ message: "Học sinh không có trong lớp học này" });
+      return;
+    }
+
+    // Delete enrollment record for this class (DO NOT delete the student account or other class enrollments)
+    await pool.query('DELETE FROM enrollments WHERE class_id = $1 AND student_id = $2', [id, studentId]);
+    res.status(200).json({ message: "Đã xóa học sinh khỏi lớp thành công" });
+  } catch (error: any) {
+    console.error("Lỗi xóa học sinh khỏi lớp:", error);
+    res.status(500).json({ message: "Lỗi server khi xóa học sinh khỏi lớp" });
   }
 };
 
