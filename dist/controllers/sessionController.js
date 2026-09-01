@@ -58,13 +58,14 @@ const getSessions = async (req, res) => {
 exports.getSessions = getSessions;
 // 2. API Lưu Nháp / Cập nhật buổi học (ĐÃ GỌT LẠI CHO KHỚP DB)
 const upsertSession = async (req, res) => {
-    const { id, class_id, session_date, start_time, content, homework } = req.body;
+    const sessionId = req.body.id || req.params.id;
+    const { class_id, session_date, start_time, end_time, content, homework } = req.body;
     try {
         const user = req.user;
         if (user?.role === 'TEACHER') {
             let checkClassId = class_id;
-            if (id) {
-                const getSession = await db_1.default.query('SELECT class_id FROM sessions WHERE id = $1', [id]);
+            if (sessionId) {
+                const getSession = await db_1.default.query('SELECT class_id FROM sessions WHERE id = $1', [sessionId]);
                 if (getSession.rows.length > 0)
                     checkClassId = getSession.rows[0].class_id;
             }
@@ -77,16 +78,16 @@ const upsertSession = async (req, res) => {
             }
         }
         let result;
-        if (id) {
+        if (sessionId) {
             result = await db_1.default.query(`UPDATE sessions 
          SET session_date=$1, start_time=$2, content=$3, homework=$4 
-         WHERE id=$5 RETURNING *`, [session_date, start_time, content, homework, id]);
+         WHERE id=$5 RETURNING *`, [session_date, start_time || '18:00', content || null, homework || null, sessionId]);
         }
         else {
             result = await db_1.default.query(`INSERT INTO sessions (class_id, session_date, start_time, content, homework, is_published) 
-         VALUES ($1, $2, $3, $4, $5, false) RETURNING *`, [class_id, session_date, start_time, content, homework]);
+         VALUES ($1, $2, $3, $4, $5, false) RETURNING *`, [class_id, session_date, start_time || '18:00', content || null, homework || null]);
         }
-        res.status(200).json({ message: 'Đã lưu nháp thành công!', session: result.rows[0] });
+        res.status(200).json({ message: 'Đã lưu buổi học thành công!', session: result.rows[0] });
     }
     catch (error) {
         console.error("Lỗi lưu buổi học:", error);
@@ -116,23 +117,50 @@ const publishSessions = async (req, res) => {
     }
 };
 exports.publishSessions = publishSessions;
-// 4. API XÓA BUỔI HỌC
+// 4. API XÓA BUỔI HỌC (KÈM DỌN DẸP GOOGLE CALENDAR)
 const deleteSession = async (req, res) => {
     const { id } = req.params;
     try {
         const user = req.user;
-        if (user?.role === 'TEACHER') {
-            const check = await db_1.default.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [id, user.id]);
-            if (check.rows.length === 0) {
-                res.status(403).json({ message: "Không có quyền xóa session này" });
-                return;
+        const sessionRes = await db_1.default.query('SELECT s.id, s.google_event_id, c.teacher_id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1', [id]);
+        if (sessionRes.rows.length === 0) {
+            res.status(404).json({ message: "Không tìm thấy buổi học" });
+            return;
+        }
+        const session = sessionRes.rows[0];
+        if (user?.role === 'TEACHER' && session.teacher_id !== user.id) {
+            res.status(403).json({ message: "Bạn không có quyền xóa buổi học này" });
+            return;
+        }
+        // Attempt to delete Google Calendar Event if it exists
+        if (session.google_event_id) {
+            try {
+                const teacherRes = await db_1.default.query('SELECT google_calendar_tokens FROM users WHERE id = $1', [session.teacher_id]);
+                const rawTokens = teacherRes.rows[0]?.google_calendar_tokens;
+                if (rawTokens) {
+                    const parsedTokens = typeof rawTokens === 'string' ? JSON.parse(rawTokens) : rawTokens;
+                    if (parsedTokens?.access_token || parsedTokens?.refresh_token) {
+                        const userOAuth2Client = new googleapis_1.google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI);
+                        userOAuth2Client.setCredentials(parsedTokens);
+                        const calendar = googleapis_1.google.calendar({ version: 'v3', auth: userOAuth2Client });
+                        await calendar.events.delete({
+                            calendarId: 'primary',
+                            eventId: session.google_event_id,
+                            sendUpdates: 'all'
+                        });
+                    }
+                }
+            }
+            catch (calErr) {
+                console.warn('Không thể xóa sự kiện trên Google Calendar (hoặc sự kiện đã bị xóa trước đó):', calErr?.message);
             }
         }
         await db_1.default.query('DELETE FROM sessions WHERE id = $1', [id]);
-        res.status(200).json({ message: 'Đã xóa buổi học' });
+        res.status(200).json({ message: 'Đã xóa buổi học và đồng bộ dọn dẹp Google Calendar thành công' });
     }
     catch (error) {
-        res.status(500).json({ message: 'Lỗi khi xóa' });
+        console.error('Lỗi khi xóa session:', error);
+        res.status(500).json({ message: 'Lỗi máy chủ nội bộ khi xóa buổi học' });
     }
 };
 exports.deleteSession = deleteSession;
@@ -247,7 +275,7 @@ const syncCalendar = async (req, res) => {
         const { id } = req.params; // session id
         const teacherId = req.user?.id;
         if (!teacherId) {
-            res.status(401).json({ message: 'Unauthorized' });
+            res.status(401).json({ message: 'Bạn chưa đăng nhập hoặc phiên làm việc đã hết hạn' });
             return;
         }
         const sessionRes = await db_1.default.query(`SELECT s.*, c.teacher_id, c.class_name 
@@ -273,7 +301,18 @@ const syncCalendar = async (req, res) => {
             res.status(400).json({ message: 'Tài khoản chưa liên kết Google Calendar. Vui lòng bấm "Tích hợp Google Calendar" để cấp quyền trước.' });
             return;
         }
-        const parsedTokens = typeof rawTokens === 'string' ? JSON.parse(rawTokens) : rawTokens;
+        let parsedTokens;
+        try {
+            parsedTokens = typeof rawTokens === 'string' ? JSON.parse(rawTokens) : rawTokens;
+        }
+        catch (parseErr) {
+            res.status(400).json({ message: 'Dữ liệu Google Calendar Token không hợp lệ. Vui lòng bấm "Tích hợp Google Calendar" để kết nối lại.' });
+            return;
+        }
+        if (!parsedTokens || (!parsedTokens.access_token && !parsedTokens.refresh_token)) {
+            res.status(400).json({ message: 'Tài khoản chưa có mã xác thực Google Calendar hợp lệ. Vui lòng kết nối lại.' });
+            return;
+        }
         const userOAuth2Client = new googleapis_1.google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI);
         userOAuth2Client.setCredentials(parsedTokens);
         const calendar = googleapis_1.google.calendar({ version: 'v3', auth: userOAuth2Client });
@@ -288,14 +327,10 @@ const syncCalendar = async (req, res) => {
                 console.warn('Could not fetch google userinfo email:', e);
             }
         }
-        // Format local ISO date cleanly without UTC shift
+        // Format local ISO date cleanly
         let dateStr = '';
         if (session.session_date instanceof Date) {
-            const d = session.session_date;
-            const yyyy = d.getFullYear();
-            const mm = String(d.getMonth() + 1).padStart(2, '0');
-            const dd = String(d.getDate()).padStart(2, '0');
-            dateStr = `${yyyy}-${mm}-${dd}`;
+            dateStr = session.session_date.toISOString().substring(0, 10);
         }
         else {
             dateStr = String(session.session_date).substring(0, 10);
@@ -333,11 +368,38 @@ const syncCalendar = async (req, res) => {
         const descriptionText = `Lớp: ${session.class_name || 'Lớp học'}\nNội dung: ${session.content || 'Buổi học theo chương trình'}\nThời gian: ${startT} - ${endT}\nGiáo viên: ${userResult.rows[0]?.full_name || 'Giáo viên'}`;
         let eventId = session.google_event_id;
         let htmlLink = '';
-        if (eventId) {
-            try {
-                const patchRes = await calendar.events.patch({
+        try {
+            if (eventId) {
+                try {
+                    const patchRes = await calendar.events.patch({
+                        calendarId: 'primary',
+                        eventId: eventId,
+                        sendUpdates: attendees.length > 0 ? 'all' : 'none',
+                        requestBody: {
+                            summary: summaryText,
+                            description: descriptionText,
+                            start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+                            end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+                            status: 'confirmed',
+                            attendees: attendees.length > 0 ? attendees : undefined
+                        }
+                    });
+                    eventId = patchRes.data.id;
+                    htmlLink = patchRes.data.htmlLink || '';
+                }
+                catch (patchErr) {
+                    if (patchErr?.code === 404 || patchErr?.message?.includes('Not Found')) {
+                        console.warn('Sự kiện cũ không còn tồn tại trên Google Calendar, tiến hành tạo mới...');
+                        eventId = null;
+                    }
+                    else {
+                        throw patchErr;
+                    }
+                }
+            }
+            if (!eventId) {
+                const insertRes = await calendar.events.insert({
                     calendarId: 'primary',
-                    eventId: eventId,
                     sendUpdates: attendees.length > 0 ? 'all' : 'none',
                     requestBody: {
                         summary: summaryText,
@@ -348,62 +410,56 @@ const syncCalendar = async (req, res) => {
                         attendees: attendees.length > 0 ? attendees : undefined
                     }
                 });
-                eventId = patchRes.data.id;
-                htmlLink = patchRes.data.htmlLink || '';
+                eventId = insertRes.data.id;
+                htmlLink = insertRes.data.htmlLink || '';
+                await db_1.default.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [eventId, session.id]);
             }
-            catch (patchErr) {
-                if (patchErr?.code === 404 || patchErr?.message?.includes('Not Found')) {
-                    console.warn('Sự kiện cũ không còn tồn tại trên Google Calendar, tiến hành tạo mới...');
-                    eventId = null;
-                }
-                else {
-                    throw patchErr;
-                }
-            }
-        }
-        if (!eventId) {
-            const insertRes = await calendar.events.insert({
+            // POST-SYNC VERIFICATION (P0)
+            const verifyRes = await calendar.events.get({
                 calendarId: 'primary',
-                sendUpdates: attendees.length > 0 ? 'all' : 'none',
-                requestBody: {
-                    summary: summaryText,
-                    description: descriptionText,
-                    start: { dateTime: `${dateStr}T${startT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
-                    end: { dateTime: `${dateStr}T${endT}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
-                    status: 'confirmed',
-                    attendees: attendees.length > 0 ? attendees : undefined
-                }
+                eventId: eventId
             });
-            eventId = insertRes.data.id;
-            htmlLink = insertRes.data.htmlLink || '';
-            await db_1.default.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [eventId, session.id]);
+            if (!verifyRes.data || verifyRes.data.status === 'cancelled') {
+                throw new Error('Google Calendar chưa xác nhận sự kiện. Vui lòng thử lại.');
+            }
+            htmlLink = verifyRes.data.htmlLink || htmlLink || `https://calendar.google.com/calendar/r/eventedit/${eventId}`;
+            res.status(200).json({
+                success: true,
+                message: 'Đồng bộ buổi học vào Google Calendar thành công!',
+                event_id: eventId,
+                html_link: htmlLink,
+                calendar_id: 'primary',
+                calendar_account: googleEmail || undefined,
+                attendees_count: attendees.length
+            });
         }
-        // POST-SYNC VERIFICATION (P0)
-        const verifyRes = await calendar.events.get({
-            calendarId: 'primary',
-            eventId: eventId
-        });
-        if (!verifyRes.data || verifyRes.data.status === 'cancelled') {
-            throw new Error('Google Calendar chưa xác nhận sự kiện. Vui lòng thử lại.');
-        }
-        htmlLink = verifyRes.data.htmlLink || htmlLink || `https://calendar.google.com/calendar/r/eventedit/${eventId}`;
-        res.status(200).json({
-            success: true,
-            message: 'Đồng bộ buổi học vào Google Calendar thành công!',
-            event_id: eventId,
-            html_link: htmlLink,
-            calendar_id: 'primary',
-            calendar_account: googleEmail || undefined,
-            attendees_count: attendees.length
-        });
-    }
-    catch (error) {
-        console.error("Lỗi đồng bộ Google Calendar:", error);
-        if (error?.message?.includes('invalid_grant') || error?.code === 401) {
-            res.status(401).json({ message: 'Tài khoản Google Calendar cần được kết nối lại do phiên đăng nhập đã hết hạn. Vui lòng bấm "Tích hợp Google Calendar" để cấp lại quyền.' });
+        catch (googleApiErr) {
+            console.error("Google API Error in syncCalendar:", googleApiErr);
+            const errMsg = googleApiErr?.message || '';
+            const status = googleApiErr?.status || googleApiErr?.code || googleApiErr?.response?.status;
+            if (errMsg.includes('invalid_grant') || status === 401) {
+                res.status(401).json({ message: 'Phiên đăng nhập Google Calendar đã hết hạn. Vui lòng bấm "Tích hợp Google Calendar" để cấp lại quyền.' });
+                return;
+            }
+            if (status === 403 || errMsg.includes('quota') || errMsg.includes('insufficientPermissions')) {
+                res.status(403).json({ message: 'Tài khoản Google chưa được cấp quyền ghi Lịch hoặc đã vượt hạn mức gọi Google API.' });
+                return;
+            }
+            if (status === 404) {
+                res.status(502).json({ message: 'Không tìm thấy Lịch mặc định (Primary Calendar) trên tài khoản Google của bạn.' });
+                return;
+            }
+            if (errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('ECONNRESET')) {
+                res.status(502).json({ message: 'Không thể kết nối đến máy chủ Google Calendar. Vui lòng kiểm tra kết nối mạng.' });
+                return;
+            }
+            res.status(502).json({ message: `Google Calendar trả về lỗi: ${errMsg || 'Không thể đồng bộ'}` });
             return;
         }
-        res.status(500).json({ message: error?.message || 'Lỗi khi đồng bộ Google Calendar' });
+    }
+    catch (error) {
+        console.error("Database or Server Error in syncCalendar:", error);
+        res.status(500).json({ message: 'Lỗi máy chủ nội bộ khi xử lý đồng bộ Calendar' });
     }
 };
 exports.syncCalendar = syncCalendar;

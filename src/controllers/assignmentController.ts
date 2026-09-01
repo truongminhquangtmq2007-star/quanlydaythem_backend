@@ -62,3 +62,29 @@ export const getClassAssignments = async (req: AuthRequest, res: Response): Prom
   }
 };
 
+// DELETE /api/assignments/:id or /api/classes/:id/assignments/:assignmentId
+export const deleteAssignment = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id, assignmentId } = req.params;
+    const targetId = assignmentId || id;
+    const user = req.user;
+
+    if (user?.role === 'TEACHER') {
+      const check = await pool.query(
+        'SELECT a.id FROM assignments a JOIN classes c ON a.class_id = c.id WHERE a.id = $1 AND c.teacher_id = $2',
+        [targetId, user.id]
+      );
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Bạn không có quyền xóa bài tập này hoặc bài tập không tồn tại" });
+        return;
+      }
+    }
+
+    await pool.query('DELETE FROM assignments WHERE id = $1', [targetId]);
+    res.status(200).json({ message: 'Đã xóa bài tập được giao thành công' });
+  } catch (error) {
+    console.error('Error deleting assignment:', error);
+    res.status(500).json({ message: "Lỗi server khi xóa bài tập" });
+  }
+};
+

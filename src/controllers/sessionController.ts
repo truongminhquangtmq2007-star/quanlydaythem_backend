@@ -127,22 +127,54 @@ export const publishSessions = async (req: AuthRequest, res: Response): Promise<
   }
 };
 
-// 4. API XÓA BUỔI HỌC
+// 4. API XÓA BUỔI HỌC (KÈM DỌN DẸP GOOGLE CALENDAR)
 export const deleteSession = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
   try {
     const user = req.user;
-    if (user?.role === 'TEACHER') {
-        const check = await pool.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [id, user.id]);
-        if (check.rows.length === 0) {
-            res.status(403).json({ message: "Không có quyền xóa session này" });
-            return;
-        }
+    const sessionRes = await pool.query(
+      'SELECT s.id, s.google_event_id, c.teacher_id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1',
+      [id]
+    );
+    if (sessionRes.rows.length === 0) {
+      res.status(404).json({ message: "Không tìm thấy buổi học" });
+      return;
     }
+    const session = sessionRes.rows[0];
+
+    if (user?.role === 'TEACHER' && session.teacher_id !== user.id) {
+      res.status(403).json({ message: "Bạn không có quyền xóa buổi học này" });
+      return;
+    }
+
+    // Attempt to delete Google Calendar Event if it exists
+    if (session.google_event_id) {
+      try {
+        const teacherRes = await pool.query('SELECT google_calendar_tokens FROM users WHERE id = $1', [session.teacher_id]);
+        const rawTokens = teacherRes.rows[0]?.google_calendar_tokens;
+        if (rawTokens) {
+          const parsedTokens = typeof rawTokens === 'string' ? JSON.parse(rawTokens) : rawTokens;
+          if (parsedTokens?.access_token || parsedTokens?.refresh_token) {
+            const userOAuth2Client = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI);
+            userOAuth2Client.setCredentials(parsedTokens);
+            const calendar = google.calendar({ version: 'v3', auth: userOAuth2Client });
+            await calendar.events.delete({
+              calendarId: 'primary',
+              eventId: session.google_event_id,
+              sendUpdates: 'all'
+            });
+          }
+        }
+      } catch (calErr: any) {
+        console.warn('Không thể xóa sự kiện trên Google Calendar (hoặc sự kiện đã bị xóa trước đó):', calErr?.message);
+      }
+    }
+
     await pool.query('DELETE FROM sessions WHERE id = $1', [id]);
-    res.status(200).json({ message: 'Đã xóa buổi học' });
+    res.status(200).json({ message: 'Đã xóa buổi học và đồng bộ dọn dẹp Google Calendar thành công' });
   } catch (error) {
-    res.status(500).json({ message: 'Lỗi khi xóa' });
+    console.error('Lỗi khi xóa session:', error);
+    res.status(500).json({ message: 'Lỗi máy chủ nội bộ khi xóa buổi học' });
   }
 };
 // Hàm dành riêng cho Học sinh/Phụ huynh (Chỉ lấy các buổi đã công bố)

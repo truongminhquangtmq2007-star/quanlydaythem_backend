@@ -3,10 +3,35 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateAIEvaluation = exports.resetStudentPassword = exports.updateStudentGoals = exports.deleteStudent = exports.updateStudent = exports.getProfile360 = exports.createStudent = exports.getStudents = void 0;
+exports.generateAIEvaluation = exports.resetStudentPassword = exports.updateStudentGoals = exports.deleteStudent = exports.updateStudent = exports.getProfile360 = exports.createStudent = exports.getStudents = exports.searchGlobalStudents = void 0;
 const geminiService_1 = require("../services/geminiService");
 const db_1 = __importDefault(require("../db"));
+const bcrypt_1 = __importDefault(require("bcrypt"));
 // LẤY DANH SÁCH HỌC SINH (HỖ TRỢ SEARCH & LỌC KHỐI)
+const searchGlobalStudents = async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q || typeof q !== 'string' || q.trim().length === 0) {
+            res.status(200).json([]);
+            return;
+        }
+        const trimmed = q.trim();
+        const query = `
+            SELECT id, full_name, phone_number, school_name, email
+            FROM students 
+            WHERE (is_active = TRUE OR is_active IS NULL)
+            AND (full_name ILIKE $1 OR phone_number ILIKE $1 OR email ILIKE $1)
+            ORDER BY full_name ASC LIMIT 20
+        `;
+        const result = await db_1.default.query(query, [`%${trimmed}%`]);
+        res.status(200).json(result.rows);
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Lỗi tìm kiếm học sinh" });
+    }
+};
+exports.searchGlobalStudents = searchGlobalStudents;
 const getStudents = async (req, res) => {
     try {
         const { search, grade } = req.query;
@@ -14,7 +39,7 @@ const getStudents = async (req, res) => {
         const values = [];
         let count = 1;
         if (req.user && req.user.role === 'TEACHER') {
-            query += ' JOIN enrollments e ON s.id = e.student_id JOIN classes c ON e.class_id = c.id WHERE c.teacher_id = $' + count + ' AND (s.is_active = TRUE OR s.is_active IS NULL) ';
+            query += ' LEFT JOIN enrollments e ON s.id = e.student_id LEFT JOIN classes c ON e.class_id = c.id WHERE (c.teacher_id = $' + count + ' OR s.teacher_id = $' + count + ') AND (s.is_active = TRUE OR s.is_active IS NULL) ';
             values.push(req.user.id);
             count++;
         }
@@ -43,29 +68,28 @@ const getStudents = async (req, res) => {
 exports.getStudents = getStudents;
 // THÊM HỌC SINH MỚI
 const createStudent = async (req, res) => {
-    let { student_code, full_name, phone, phone_number, parent_phone, school, school_name, grade, current_level, email, password } = req.body;
+    const { full_name, date_of_birth, phone_number, school_name, notes, email, password } = req.body;
     const user = req.user;
-    if (!student_code) {
-        student_code = 'HS' + Date.now().toString().slice(-6);
-    }
-    const phoneToUse = phone || phone_number || '';
-    const schoolToUse = school || school_name || '';
     try {
-        const result = await db_1.default.query(`INSERT INTO students (student_code, full_name, phone_number, parent_phone, school_name, school, grade, current_level, email) 
-       VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8) RETURNING *`, [student_code, full_name, phoneToUse, parent_phone, schoolToUse, grade, current_level, email || null]);
+        const passwordHash = await bcrypt_1.default.hash(password || '123456', 10);
+        const username = phone_number;
+        const result = await db_1.default.query(`INSERT INTO students (
+        full_name, date_of_birth, phone_number, school_name, notes,
+        email, teacher_id, username, password
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`, [
+            full_name,
+            date_of_birth || null,
+            phone_number,
+            school_name || null,
+            notes || null,
+            email || null,
+            user?.id || null,
+            username,
+            passwordHash
+        ]);
         const student = result.rows[0];
-        // Tạo tài khoản đăng nhập cho học sinh (Role = 'STUDENT')
         try {
-            const username = phoneToUse || student_code;
-            const userEmail = email || `${username.toLowerCase()}@student.local`; // Cần cho DB schema cũ nếu email NOT NULL
-            const bcrypt = require('bcrypt');
-            const passwordHash = await bcrypt.hash(password || '123456', 10);
-            // Kiểm tra cột username trong users
-            try {
-                await db_1.default.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255) UNIQUE;`);
-            }
-            catch (e) { }
-            await db_1.default.query(`INSERT INTO users (username, email, password_hash, role, full_name, student_id) VALUES ($1, $2, $3, $4, $5, $6)`, [username, userEmail, passwordHash, 'STUDENT', full_name, student.id]);
+            await db_1.default.query(`INSERT INTO users (username, password_hash, role, full_name, student_id) VALUES ($1, $2, $3, $4, $5)`, [username, passwordHash, 'STUDENT', full_name, student.id]);
         }
         catch (e) {
             console.log('Không thể tạo user tự động cho học sinh:', e);
@@ -76,22 +100,8 @@ const createStudent = async (req, res) => {
         });
     }
     catch (error) {
-        // Fallback cho schema cũ nếu initCore.sql chưa được chạy hoàn chỉnh
-        try {
-            const username = phoneToUse || student_code;
-            const bcrypt = require('bcrypt');
-            const hashedPassword = await bcrypt.hash(password || '123456', 10);
-            const fallback = await db_1.default.query(`INSERT INTO students (full_name, phone_number, username, password, teacher_id) 
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`, [full_name, phoneToUse, username, hashedPassword, user?.id || null]);
-            res.status(201).json({
-                message: 'Thêm học sinh thành công (schema cũ)',
-                student: fallback.rows[0]
-            });
-        }
-        catch (e) {
-            console.error(error);
-            res.status(500).json({ message: 'Lỗi máy chủ nội bộ' });
-        }
+        console.error('Lỗi tạo học sinh:', error);
+        res.status(500).json({ message: 'Lỗi máy chủ nội bộ' });
     }
 };
 exports.createStudent = createStudent;
@@ -104,7 +114,6 @@ const getProfile360 = async (req, res) => {
             return;
         }
         const student = studentRes.rows[0];
-        // Lấy lớp học (sửa class_members thành enrollments)
         const classRes = await db_1.default.query('SELECT c.class_name, c.schedule, c.meet_link FROM enrollments e JOIN classes c ON e.class_id = c.id WHERE e.student_id = $1 AND e.status = \'ACTIVE\'', [id]);
         const attendRes = await db_1.default.query('SELECT status, count(*) FROM attendance WHERE student_id = $1 GROUP BY status', [id]);
         const scoresRes = await db_1.default.query('SELECT document_id, total_score, submitted_at FROM exam_submissions WHERE student_id = $1 ORDER BY submitted_at DESC LIMIT 5', [id]);
@@ -137,14 +146,6 @@ exports.updateStudent = updateStudent;
 const deleteStudent = async (req, res) => {
     try {
         const { id } = req.params;
-        try {
-            await db_1.default.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE');
-        }
-        catch (e) { }
-        try {
-            await db_1.default.query('UPDATE students SET is_active = TRUE WHERE is_active IS NULL');
-        }
-        catch (e) { }
         await db_1.default.query('UPDATE students SET is_active = FALSE WHERE id = $1', [id]);
         res.status(200).json({ message: "Đã xóa (ẩn) học sinh thành công" });
     }
@@ -191,6 +192,20 @@ exports.resetStudentPassword = resetStudentPassword;
 const generateAIEvaluation = async (req, res) => {
     const { id } = req.params;
     try {
+        if (req.user?.role === 'STUDENT') {
+            res.status(403).json({ message: "Học sinh không có quyền truy cập tính năng phân tích của giáo viên." });
+            return;
+        }
+        if (req.user?.role === 'TEACHER') {
+            const check = await db_1.default.query(`SELECT 1 FROM students s
+                 LEFT JOIN enrollments e ON s.id = e.student_id
+                 LEFT JOIN classes c ON e.class_id = c.id
+                 WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [id, req.user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền phân tích học sinh này" });
+                return;
+            }
+        }
         // 1. Get student profile
         const studentRes = await db_1.default.query('SELECT full_name, school_name, is_active FROM students WHERE id = $1', [id]);
         if (studentRes.rows.length === 0) {

@@ -6,6 +6,7 @@ import {
     submitExam, 
     getExamSubmissions, 
     getMySubmissions, 
+    getSubmissionDetail,
     getExamKey,
     askAITutor,
     createExamFromText,
@@ -31,7 +32,6 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.post('/key', verifyToken, isTeacherOrAdmin, saveAnswerKey);
 
 // 2. Tự động bóc tách đề và tạo đáp án bằng AI (Text)
-// Sửa dòng này:
 router.post('/parse-ai-text', verifyToken, isTeacherOrAdmin, createExamFromText);
 // 3. Tự động bóc tách đề từ FILE (PDF/Ảnh)
 router.post('/parse-ai-file', verifyToken, isTeacherOrAdmin, uploadMemory.single('examFile'), parseExamFromFile);
@@ -54,9 +54,11 @@ router.post('/:id/draft', verifyToken, saveDraftExam);
 router.post('/:id/submit', verifyToken, submitExam);
 router.post('/submit', verifyToken, submitExam);
 
-// 7. Lấy lịch sử điểm thi cá nhân
+// 7. Lấy lịch sử điểm thi cá nhân & chi tiết từng lần thi
 router.get('/my-submissions', verifyToken, getMySubmissions);
+router.get('/submissions/:id', verifyToken, getSubmissionDetail);
 
-export default router;
 // Gia sư AI giải đáp thắc mắc
 router.post('/ask-tutor', verifyToken, askAITutor);
+
+export default router;

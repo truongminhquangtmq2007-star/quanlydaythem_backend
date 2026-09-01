@@ -222,18 +222,30 @@ export const deleteDocument = async (req: AuthRequest, res: Response): Promise<v
     if (user?.role === 'TEACHER') {
       const check = await pool.query('SELECT id FROM documents WHERE id = $1 AND teacher_id = $2', [id, user.id]);
       if (check.rows.length === 0) {
-        res.status(403).json({ error: 'Không có quyền xóa tài liệu này' });
+        res.status(403).json({ error: 'Không có quyền xóa tài liệu/đề thi này' });
         return;
       }
     }
 
-    // Delete assignments referencing this document first to avoid foreign key issues
-    await pool.query('DELETE FROM assignments WHERE document_id = $1', [id]);
-    await pool.query('DELETE FROM documents WHERE id = $1', [id]);
-    res.status(200).json({ message: 'Đã xóa tài liệu' });
+    try { await pool.query('ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE'); } catch(e){}
+
+    // Check if document has student submissions
+    const subCheck = await pool.query('SELECT id FROM exam_submissions WHERE document_id = $1 LIMIT 1', [id]);
+    if (subCheck.rows.length > 0) {
+      // Soft-delete to preserve student exam attempt history
+      await pool.query('UPDATE documents SET is_active = FALSE WHERE id = $1', [id]);
+    } else {
+      // Hard-delete if no submissions exist
+      await pool.query('DELETE FROM assignments WHERE document_id = $1', [id]);
+      await pool.query('DELETE FROM exam_keys WHERE document_id = $1', [id]);
+      await pool.query('DELETE FROM question_contexts WHERE document_id = $1', [id]);
+      await pool.query('DELETE FROM documents WHERE id = $1', [id]);
+    }
+    
+    res.status(200).json({ message: 'Đã xóa tài liệu/đề thi thành công' });
   } catch (error) {
     console.error('Lỗi deleteDocument:', error);
-    res.status(500).json({ error: 'Lỗi server' });
+    res.status(500).json({ error: 'Lỗi server khi xóa tài liệu/đề thi' });
   }
 };
 

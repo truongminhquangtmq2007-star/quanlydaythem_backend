@@ -673,31 +673,119 @@ export const getExamSubmissions = async (req: AuthRequest, res: Response): Promi
 // ========================================================
 // 4. API HỌC SINH: LẤY LỊCH SỬ THI CÁ NHÂN
 // ========================================================
+// 4. API HỌC SINH: LẤY LỊCH SỬ ĐIỂM THI CÁ NHÂN (TẤT CẢ LẦN THI)
+// ========================================================
 export const getMySubmissions = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const studentId = req.user?.id;
         const result = await pool.query(
-    `SELECT 
-        es.id,
-        es.document_id,
-        d.title,
-        es.total_score,
-        es.part1_score,
-        es.part2_score,
-        es.part3_score,
-        es.cheat_count,
-        es.submitted_at,
-        es.time_taken_seconds
-     FROM exam_submissions es
-     LEFT JOIN documents d ON d.id = es.document_id
-     WHERE es.student_id = $1
-     ORDER BY es.submitted_at DESC`,
-    [studentId]
-);
+            `SELECT 
+                es.id,
+                es.document_id,
+                d.title,
+                es.total_score,
+                es.part1_score,
+                es.part2_score,
+                es.part3_score,
+                es.cheat_count,
+                es.submitted_at,
+                es.time_taken_seconds,
+                COALESCE(ek.allow_view_answers, false) as allow_view_answers,
+                ek.duration_minutes
+             FROM exam_submissions es
+             LEFT JOIN documents d ON d.id = es.document_id
+             LEFT JOIN exam_keys ek ON ek.document_id = es.document_id
+             WHERE es.student_id = $1 AND es.status = 'COMPLETED'
+             ORDER BY es.submitted_at DESC`,
+            [studentId]
+        );
         res.status(200).json(result.rows);
     } catch (error) {
         console.error('Lỗi lấy điểm cá nhân:', error);
-        res.status(500).json({ message: 'Lỗi server' });
+        res.status(500).json({ message: 'Lỗi server khi lấy lịch sử bài thi' });
+    }
+};
+
+// ========================================================
+// 4.1 API CHI TIẾT 1 LẦN THI CỤ THỂ (ATTEMPT DETAIL & REVIEW)
+// ========================================================
+export const getSubmissionDetail = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params; // submission id
+        const user = req.user;
+
+        const subRes = await pool.query(
+            `SELECT es.*, d.title as exam_title, ek.allow_view_answers, ek.duration_minutes, ek.exam_content
+             FROM exam_submissions es
+             JOIN documents d ON es.document_id = d.id
+             LEFT JOIN exam_keys ek ON es.document_id = ek.document_id
+             WHERE es.id = $1`,
+            [id]
+        );
+
+        if (subRes.rows.length === 0) {
+            res.status(404).json({ message: 'Không tìm thấy bài thi' });
+            return;
+        }
+
+        const submission = subRes.rows[0];
+
+        // Authorization: student can only view their own submissions; teachers/admins can view any
+        if (user?.role === 'STUDENT' && Number(submission.student_id) !== Number(user.id)) {
+            res.status(403).json({ message: 'Bạn không có quyền xem kết quả bài thi này' });
+            return;
+        }
+
+        const allowView = Boolean(submission.allow_view_answers || user?.role === 'TEACHER' || user?.role === 'ADMIN');
+        let parsedDetails = typeof submission.answers === 'string' ? JSON.parse(submission.answers) : (submission.answers || []);
+
+        if (user?.role === 'STUDENT' && !allowView) {
+            // Strip correct answers if teacher has not allowed answer viewing
+            parsedDetails = parsedDetails.map((d: any) => ({
+                question_id: d.question_id,
+                part: d.part,
+                student_answer: d.student_answer,
+                score_earned: d.score_earned,
+                max_score: d.max_score,
+                is_correct: d.is_correct
+            }));
+        }
+
+        let examContent = submission.exam_content || {};
+        if (user?.role === 'STUDENT' && !allowView) {
+            const stripped = JSON.parse(JSON.stringify(examContent));
+            ['part1', 'part2', 'part3'].forEach(part => {
+                if (Array.isArray(stripped[part])) {
+                    stripped[part].forEach((q: any) => {
+                        delete q.correctAnswer;
+                        delete q.explanation;
+                        delete q.solution;
+                    });
+                }
+            });
+            examContent = stripped;
+        }
+
+        res.status(200).json({
+            id: submission.id,
+            document_id: submission.document_id,
+            exam_title: submission.exam_title,
+            student_id: submission.student_id,
+            total_score: submission.total_score,
+            part1_score: submission.part1_score,
+            part2_score: submission.part2_score,
+            part3_score: submission.part3_score,
+            cheat_count: submission.cheat_count,
+            time_taken_seconds: submission.time_taken_seconds,
+            submitted_at: submission.submitted_at,
+            allow_view_answers: submission.allow_view_answers,
+            student_answers: submission.student_answers,
+            details: parsedDetails,
+            exam_content: examContent
+        });
+    } catch (error) {
+        console.error('Lỗi getSubmissionDetail:', error);
+        res.status(500).json({ message: 'Lỗi server khi lấy chi tiết bài thi' });
     }
 };
 
@@ -1053,30 +1141,15 @@ const ai = new GoogleGenAI({
 export const askAITutor = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const studentId = req.user?.id;
-        const { exam_id, question_id, student_question } = req.body;
+        const { exam_id, question_id, student_question, student_answer: clientStudentAns } = req.body;
 
-        if (!studentId || !exam_id || !question_id || !student_question) {
-            res.status(400).json({ message: 'Thiếu thông tin cần thiết' });
+        if (!exam_id || !question_id || !student_question) {
+            res.status(400).json({ message: 'Thiếu thông tin cần thiết (exam_id, question_id, student_question)' });
             return;
         }
 
-        // Lấy thông tin bài thi của học sinh
-        const submissionRes = await pool.query(
-            "SELECT student_answers, answers AS detailed_results FROM exam_submissions WHERE student_id = $1 AND document_id = $2 AND status = 'COMPLETED'",
-            [studentId, exam_id]
-        );
-
-        if (submissionRes.rows.length === 0) {
-            res.status(404).json({ message: 'Không tìm thấy kết quả làm bài của bạn.' });
-            return;
-        }
-
-        const submission = submissionRes.rows[0];
-        const detailedResults = submission.detailed_results || [];
-        const questionDetail = detailedResults.find((q: any) => String(q.question_id) === String(question_id));
-
-        // Lấy đề và đáp án chuẩn
-        const keyRes = await pool.query("SELECT exam_content FROM exam_keys WHERE document_id = $1", [exam_id]);
+        // 1. Lấy đề thi và nội dung câu hỏi
+        const keyRes = await pool.query("SELECT exam_content, allow_view_answers FROM exam_keys WHERE document_id = $1", [exam_id]);
         if (keyRes.rows.length === 0) {
             res.status(404).json({ message: 'Không tìm thấy dữ liệu đề thi.' });
             return;
@@ -1096,21 +1169,50 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
             return;
         }
 
-        const subTopic = qData.sub_topic || qData.topic || 'Chưa phân loại';
-        const questionContent = qData.questionText || '';
-        const correctAnswer = questionDetail?.correct_answer || qData.correctAnswer || '';
-        const studentAnswer = questionDetail?.student_answer || 'Không trả lời';
-        const solutionText = qData.solution || qData.explanation || 'Không có lời giải chi tiết';
+        // 2. Tìm Shared Context (nếu có)
+        const sharedList = examContent.sharedContexts || examContent.shared_context || [];
+        const sharedCtx = sharedList.find((g: any) => (g.questionIds || g.question_ids || []).includes(Number(question_id)));
+        const sharedContextText = sharedCtx ? `\n[NGỮ LIỆU ĐỌC HIỂU DÙNG CHO CÂU NÀY]: ${sharedCtx.content}` : '';
 
-        const prompt = `Đóng vai một giáo viên Toán/Lý tận tâm. Học sinh đang hỏi về 1 câu thuộc chuyên đề ${subTopic}.
-Nội dung câu hỏi: ${questionContent}.
-Đáp án đúng là: ${JSON.stringify(correctAnswer)}.
-Học sinh đã chọn đáp án: ${JSON.stringify(studentAnswer)}.
+        // 3. Lấy thông tin bài làm của học sinh (nếu đã nộp)
+        let studentAnswer = clientStudentAns || 'Chưa chọn';
+        let correctAnswer = qData.correctAnswer || '';
+        let solutionText = qData.solution || qData.explanation || 'Chưa có lời giải chi tiết';
+
+        if (studentId) {
+            const submissionRes = await pool.query(
+                "SELECT student_answers, answers AS detailed_results FROM exam_submissions WHERE student_id = $1 AND document_id = $2 ORDER BY submitted_at DESC LIMIT 1",
+                [studentId, exam_id]
+            );
+            if (submissionRes.rows.length > 0) {
+                const submission = submissionRes.rows[0];
+                const detailedResults = submission.detailed_results || [];
+                const questionDetail = detailedResults.find((q: any) => String(q.question_id) === String(question_id));
+                if (questionDetail) {
+                    studentAnswer = questionDetail.student_answer ?? studentAnswer;
+                    correctAnswer = questionDetail.correct_answer ?? correctAnswer;
+                }
+            }
+        }
+
+        const subTopic = qData.sub_topic || qData.topic || 'Kiến thức tổng hợp';
+        const questionContent = qData.questionText || '';
+        const optionsText = qData.options ? `\nCác lựa chọn:\nA. ${qData.options.A || ''}\nB. ${qData.options.B || ''}\nC. ${qData.options.C || ''}\nD. ${qData.options.D || ''}` : '';
+
+        const prompt = `Đóng vai một gia sư AI dạy kèm Toán/Khoa học tận tâm và thông minh.
+Học sinh đang hỏi về Câu ${question_id} (Chuyên đề: ${subTopic}).${sharedContextText}
+Nội dung câu hỏi: ${questionContent}${optionsText}
+Đáp án đúng chuẩn: ${JSON.stringify(correctAnswer)}.
+Học sinh đã chọn: ${JSON.stringify(studentAnswer)}.
 Lời giải tham khảo: ${solutionText}.
 
-Câu hỏi của học sinh: "${student_question}"
+Câu hỏi thắc mắc của học sinh: "${student_question}"
 
-Nhiệm vụ của bạn: Dựa vào lời giải chuẩn, hãy giải thích NGẮN GỌN, DỄ HIỂU, tập trung trả lời đúng vào thắc mắc của học sinh. Chỉ ra vì sao đáp án của học sinh bị sai (bắt bệnh tư duy). Trình bày bằng Markdown, sử dụng LaTeX cho công thức toán học (bọc trong dấu $ hoặc $$). Định hướng giải thích: Nếu là Toán/Lý 12 thì hướng tới cách giải nhanh trắc nghiệm cùng với bản chất lý thuyết; nếu là Lý 11 thì phân tích sâu hiện tượng vật lí. Tránh tình trạng học sinh học vẹt, nội dung câu trả lời không được lan man nhưng phải có bản chất, được đi kèm với mẹo giải nhanh nhưng chỉ là yếu tố phụ đi kèm.`;
+Nhiệm vụ của bạn:
+1. Dựa vào nội dung câu hỏi và ngữ liệu, trả lời TRỰC TIẾP, NGẮN GỌN, DỄ HIỂU vào đúng điểm học sinh đang thắc mắc.
+2. Phân tích bắt bệnh tư duy: nếu học sinh hiểu sai hoặc chọn đáp án sai, hãy chỉ ra lỗ hổng tư duy và hướng dẫn cách suy luận chính xác.
+3. Nếu học sinh chỉ đang yêu cầu gợi ý hoặc hỏi cách tư duy phương pháp, KHÔNG vội vàng spoil đáp án cuối cùng ngay lập tức mà hãy dẫn dắt từng bước.
+4. Trình bày bằng Markdown, sử dụng LaTeX cho công thức toán học (bọc trong dấu $ cho inline hoặc $$ cho block).`;
 
         const responseText = await generateWithFallback(prompt);
         res.status(200).json({ answer: responseText });

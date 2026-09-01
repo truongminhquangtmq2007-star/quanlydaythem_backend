@@ -7,6 +7,7 @@ export interface AuthRequest extends Request {
         student_id?: number;
     };
 }
+export declare const searchGlobalStudents: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const getStudents: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const createStudent: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const getProfile360: (req: AuthRequest, res: Response) => Promise<void>;

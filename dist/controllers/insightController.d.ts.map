@@ -1,0 +1,1 @@
+{"version":3,"file":"insightController.d.ts","sourceRoot":"","sources":["../../src/controllers/insightController.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,QAAQ,EAAE,MAAM,SAAS,CAAC;AACnC,OAAO,EAAE,WAAW,EAAE,MAAM,8BAA8B,CAAC;AAI3D,eAAO,MAAM,gBAAgB,QAAe,WAAW,OAAO,QAAQ,KAAG,OAAO,CAAC,IAAI,CAkDpF,CAAC;AAEF,eAAO,MAAM,eAAe,QAAe,WAAW,OAAO,QAAQ,KAAG,OAAO,CAAC,IAAI,CAyEnF,CAAC"}

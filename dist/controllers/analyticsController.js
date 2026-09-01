@@ -12,6 +12,17 @@ const db_1 = __importDefault(require("../db"));
 const getStudentTopics = async (req, res) => {
     try {
         const { id } = req.params;
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query(`SELECT 1 FROM students s
+             LEFT JOIN enrollments e ON s.id = e.student_id
+             LEFT JOIN classes c ON e.class_id = c.id
+             WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền xem dữ liệu của học sinh này" });
+                return;
+            }
+        }
         // Thử query bảng thật trước
         try {
             const result = await db_1.default.query(`SELECT * FROM student_topic_performance 
@@ -26,11 +37,11 @@ const getStudentTopics = async (req, res) => {
         }
         // Mock data fallback
         const mockData = [
-            { topic: 'Tích phân', attempt_count: 20, correct_count: 16, accuracy_rate: 80.0 },
-            { topic: 'Đạo hàm', attempt_count: 15, correct_count: 12, accuracy_rate: 80.0 },
-            { topic: 'Hình học không gian', attempt_count: 10, correct_count: 6, accuracy_rate: 60.0 },
-            { topic: 'Lượng giác', attempt_count: 12, correct_count: 5, accuracy_rate: 41.7 },
-            { topic: 'Tổ hợp - Xác suất', attempt_count: 8, correct_count: 7, accuracy_rate: 87.5 },
+            { topic: 'Tích phân', total_questions: 20, correct_answers: 16, accuracy_rate: 80.0 },
+            { topic: 'Đạo hàm', total_questions: 15, correct_answers: 12, accuracy_rate: 80.0 },
+            { topic: 'Hình học không gian', total_questions: 10, correct_answers: 6, accuracy_rate: 60.0 },
+            { topic: 'Lượng giác', total_questions: 12, correct_answers: 5, accuracy_rate: 41.7 },
+            { topic: 'Tổ hợp - Xác suất', total_questions: 8, correct_answers: 7, accuracy_rate: 87.5 },
         ];
         res.status(200).json(mockData);
     }
@@ -59,15 +70,15 @@ const getClassWeakTopics = async (req, res) => {
         // Thử query bảng thật trước
         try {
             const result = await db_1.default.query(`SELECT 
-                    stp.topic, 
-                    SUM(stp.attempt_count) as total_attempts,
-                    SUM(stp.correct_count) as total_corrects,
-                    ROUND(CAST(SUM(stp.correct_count) AS NUMERIC) * 100.0 / SUM(stp.attempt_count), 2) as accuracy_rate
+                    stp.topic_name AS topic, 
+                    SUM(stp.total_questions) as total_attempts,
+                    SUM(stp.correct_answers) as total_corrects,
+                    ROUND(CAST(SUM(stp.correct_answers) AS NUMERIC) * 100.0 / SUM(stp.total_questions), 2) as accuracy_rate
                  FROM student_topic_performance stp
                  JOIN enrollments cm ON stp.student_id = cm.student_id
                  WHERE cm.class_id = $1 AND cm.status = 'ACTIVE'
-                 GROUP BY stp.topic
-                 HAVING SUM(stp.attempt_count) > 0
+                 GROUP BY stp.topic_name
+                 HAVING SUM(stp.total_questions) > 0
                  ORDER BY accuracy_rate ASC
                  LIMIT 10`, [id]);
             res.status(200).json(result.rows);

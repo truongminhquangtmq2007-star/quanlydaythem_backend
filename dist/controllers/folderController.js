@@ -59,7 +59,7 @@ const getDriveContents = async (req, res) => {
       SELECT d.*, ek.allow_view_answers, ek.duration_minutes 
       FROM documents d 
       LEFT JOIN exam_keys ek ON d.id = ek.document_id 
-      WHERE d.category = $1 
+      WHERE d.category = $1 AND (d.is_active IS NULL OR d.is_active = TRUE)
     `;
         const docParams = [category];
         // Chỉ lọc theo class_id nếu cần, tùy vào cấu trúc bảng documents của bạn

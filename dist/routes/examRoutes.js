@@ -18,15 +18,14 @@ const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage()
 // ROUTES CHO GIÁO VIÊN
 // ==========================================
 // 1. Nhập/Sửa đáp án thủ công
-router.post('/key', authMiddleware_1.verifyToken, examController_1.saveAnswerKey);
+router.post('/key', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, examController_1.saveAnswerKey);
 // 2. Tự động bóc tách đề và tạo đáp án bằng AI (Text)
-// Sửa dòng này:
-router.post('/parse-ai-text', authMiddleware_1.verifyToken, examController_1.createExamFromText);
+router.post('/parse-ai-text', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, examController_1.createExamFromText);
 // 3. Tự động bóc tách đề từ FILE (PDF/Ảnh)
-router.post('/parse-ai-file', authMiddleware_1.verifyToken, uploadMiddleware_1.uploadMemory.single('examFile'), examController_1.parseExamFromFile);
+router.post('/parse-ai-file', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, uploadMiddleware_1.uploadMemory.single('examFile'), examController_1.parseExamFromFile);
 // 4. Lấy danh sách học sinh đã nộp bài của một đề
-router.get('/:document_id/submissions', authMiddleware_1.verifyToken, examController_1.getExamSubmissions);
-// 5. Lấy lại đáp án chuẩn đã lưu
+router.get('/:document_id/submissions', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, examController_1.getExamSubmissions);
+// 5. Lấy lại đáp án chuẩn đã lưu / tải đề thi làm bài
 router.get('/key/:document_id', authMiddleware_1.verifyToken, examController_1.getExamKey);
 // ==========================================
 // ROUTES CHO HỌC SINH
@@ -38,9 +37,10 @@ router.post('/:id/draft', authMiddleware_1.verifyToken, examController_2.saveDra
 // 6. Nộp bài trắc nghiệm và chấm điểm tự động
 router.post('/:id/submit', authMiddleware_1.verifyToken, examController_1.submitExam);
 router.post('/submit', authMiddleware_1.verifyToken, examController_1.submitExam);
-// 7. Lấy lịch sử điểm thi cá nhân
+// 7. Lấy lịch sử điểm thi cá nhân & chi tiết từng lần thi
 router.get('/my-submissions', authMiddleware_1.verifyToken, examController_1.getMySubmissions);
-exports.default = router;
+router.get('/submissions/:id', authMiddleware_1.verifyToken, examController_1.getSubmissionDetail);
 // Gia sư AI giải đáp thắc mắc
 router.post('/ask-tutor', authMiddleware_1.verifyToken, examController_1.askAITutor);
+exports.default = router;
 //# sourceMappingURL=examRoutes.js.map

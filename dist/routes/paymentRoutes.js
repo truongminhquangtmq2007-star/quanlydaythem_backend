@@ -5,11 +5,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const paymentController_1 = require("../controllers/paymentController");
+const authMiddleware_1 = require("../middleware/authMiddleware");
 const router = express_1.default.Router();
-// Định nghĩa các đường dẫn kết nối với Controller
-router.get('/', paymentController_1.getBills);
-router.post('/create', paymentController_1.createBill);
-router.put('/:id/pay', paymentController_1.markBillAsPaid);
-router.post('/add-exam-scores', paymentController_1.addExamScores);
+router.get('/', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, paymentController_1.getBills);
+router.post('/create', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, paymentController_1.createBill);
+router.put('/:id/pay', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, paymentController_1.markBillAsPaid);
+router.delete('/:id', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, paymentController_1.deleteBill);
+router.delete('/bills/:id', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, paymentController_1.deleteBill);
+router.post('/add-exam-scores', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, paymentController_1.addExamScores);
+router.get('/preview', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, paymentController_1.previewBill);
+router.get('/bill/:id/invoice', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, paymentController_1.getBillInvoice);
 exports.default = router;
 //# sourceMappingURL=paymentRoutes.js.map

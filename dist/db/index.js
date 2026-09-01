@@ -20,7 +20,17 @@ pool.on('error', (err) => {
     // Không throw lại lỗi ở đây — chỉ log ra, để server tiếp tục sống
 });
 pool.query('SELECT NOW()')
-    .then(() => console.log('✅ Đã kết nối thành công với cơ sở dữ liệu PostgreSQL!'))
+    .then(() => {
+    console.log('✅ Đã kết nối thành công với cơ sở dữ liệu PostgreSQL!');
+    // Ensure bank columns exist on users table for dynamic teacher invoice QR
+    pool.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS bank_code VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS account_number VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS account_name VARCHAR(100)
+    `).catch(err => console.warn('Lưu ý check bank columns:', err.message));
+})
     .catch((err) => console.error('❌ Lỗi kết nối CSDL:', err.message));
 exports.default = pool;
 //# sourceMappingURL=index.js.map

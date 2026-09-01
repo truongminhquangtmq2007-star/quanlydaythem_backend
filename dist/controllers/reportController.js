@@ -9,6 +9,17 @@ const geminiService_1 = require("../services/geminiService");
 const getWeeklyReport = async (req, res) => {
     try {
         const { id } = req.params;
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query(`SELECT 1 FROM students s
+             LEFT JOIN enrollments e ON s.id = e.student_id
+             LEFT JOIN classes c ON e.class_id = c.id
+             WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền xem báo cáo của học sinh này" });
+                return;
+            }
+        }
         // 1. Thông tin học sinh
         const studentRes = await db_1.default.query(`SELECT full_name, student_code, school, grade, learning_goals FROM students WHERE id = $1`, [id]);
         if (studentRes.rows.length === 0) {
@@ -41,7 +52,7 @@ const getWeeklyReport = async (req, res) => {
         const presentSessions = attendances.filter(a => a.status === 'PRESENT').length;
         const attendanceRate = totalSessions > 0 ? Math.round((presentSessions / totalSessions) * 100) : 100;
         // 4. Phân tích chuyên đề (Tất cả hoặc tuần qua - ta lấy tổng quan để báo cáo)
-        const topicsRes = await db_1.default.query(`SELECT topic, accuracy_rate 
+        const topicsRes = await db_1.default.query(`SELECT topic_name AS topic, accuracy_rate 
              FROM student_topic_performance 
              WHERE student_id = $1 
              ORDER BY accuracy_rate DESC`, [id]);

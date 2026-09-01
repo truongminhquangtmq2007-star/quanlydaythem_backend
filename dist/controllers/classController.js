@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateAttendance = exports.createSession = exports.addMember = exports.getSessionAttendance = exports.getClassSessions = exports.getClassMembers = exports.assignTeacher = exports.deleteClass = exports.updateClass = exports.createClass = exports.getClass = exports.getClasses = void 0;
+exports.updateAttendance = exports.createSession = exports.removeMember = exports.addMember = exports.getSessionAttendance = exports.getClassSessions = exports.getClassMembers = exports.assignTeacher = exports.deleteClass = exports.updateClass = exports.createClass = exports.getClass = exports.getClasses = void 0;
 const db_1 = __importDefault(require("../db"));
 const googleapis_1 = require("googleapis");
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'dummy_id';
@@ -36,9 +36,15 @@ const getClass = async (req, res) => {
     try {
         const { id } = req.params;
         const user = req.user;
-        const result = await db_1.default.query('SELECT * FROM classes WHERE id = $1', [id]);
+        let result;
+        if (user?.role === 'ADMIN') {
+            result = await db_1.default.query('SELECT * FROM classes WHERE id = $1', [id]);
+        }
+        else {
+            result = await db_1.default.query('SELECT * FROM classes WHERE id = $1 AND teacher_id = $2', [id, user?.id]);
+        }
         if (result.rows.length === 0) {
-            res.status(404).json({ message: "Không tìm thấy lớp học" });
+            res.status(404).json({ message: "Không tìm thấy lớp học hoặc bạn không có quyền truy cập" });
             return;
         }
         const classData = result.rows[0];
@@ -76,6 +82,14 @@ const updateClass = async (req, res) => {
     const { id } = req.params;
     const { class_name, description, teacher_id, class_type, meet_link } = req.body;
     try {
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền sửa lớp này" });
+                return;
+            }
+        }
         await db_1.default.query(`UPDATE classes SET class_name = $1, description = $2, teacher_id = $3, class_type = $4, meet_link = $5 WHERE id = $6`, [class_name, description, teacher_id || null, class_type || 'OFFLINE', meet_link || null, id]);
         res.status(200).json({ message: "Cập nhật thành công" });
     }
@@ -86,32 +100,59 @@ const updateClass = async (req, res) => {
 exports.updateClass = updateClass;
 // 4. Xóa lớp học (DELETE)
 const deleteClass = async (req, res) => {
+    const client = await db_1.default.connect();
     try {
         const { id } = req.params;
-        try {
-            await db_1.default.query('ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE');
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const check = await client.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền xóa lớp này hoặc lớp không tồn tại" });
+                return;
+            }
         }
-        catch (e) { }
-        try {
-            await db_1.default.query('UPDATE classes SET is_active = TRUE WHERE is_active IS NULL');
+        else if (user?.role === 'ADMIN') {
+            const check = await client.query('SELECT id FROM classes WHERE id = $1', [id]);
+            if (check.rows.length === 0) {
+                res.status(404).json({ message: "Không tìm thấy lớp học" });
+                return;
+            }
         }
-        catch (e) { }
-        const result = await db_1.default.query('UPDATE classes SET is_active = FALSE WHERE id = $1 RETURNING *', [id]);
+        await client.query('BEGIN');
+        // Soft delete the class to keep historical data intact
+        const result = await client.query('UPDATE classes SET is_active = FALSE WHERE id = $1 RETURNING *', [id]);
         if (result.rows.length === 0) {
+            await client.query('ROLLBACK');
             res.status(404).json({ message: "Không tìm thấy lớp học" });
             return;
         }
-        res.status(200).json({ message: "Đã xóa (ẩn) lớp học thành công" });
+        // Deactivate active enrollments in this class
+        await client.query("UPDATE enrollments SET status = 'INACTIVE' WHERE class_id = $1", [id]);
+        await client.query('COMMIT');
+        res.status(200).json({ message: "Đã xóa lớp học thành công" });
     }
     catch (error) {
+        await client.query('ROLLBACK');
         console.error('Lỗi xóa lớp:', error);
-        res.status(500).json({ message: "Lỗi máy chủ nội bộ", details: error.message });
+        res.status(500).json({ message: "Lỗi máy chủ nội bộ khi xóa lớp học" });
+    }
+    finally {
+        client.release();
     }
 };
 exports.deleteClass = deleteClass;
 // 5. Gán giáo viên cho lớp học
 const assignTeacher = async (req, res) => {
     try {
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const checkClassId = req.params.id;
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+                return;
+            }
+        }
         const classId = req.params.id;
         const { teacher_id } = req.body;
         const result = await db_1.default.query('UPDATE classes SET teacher_id = $1 WHERE id = $2 RETURNING *', [teacher_id, classId]);
@@ -131,6 +172,15 @@ exports.assignTeacher = assignTeacher;
 // ==========================================
 const getClassMembers = async (req, res) => {
     try {
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const checkClassId = req.params.id;
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+                return;
+            }
+        }
         const { id } = req.params;
         const result = await db_1.default.query('SELECT s.id, s.full_name, s.phone_number AS phone FROM students s JOIN enrollments cm ON s.id = cm.student_id WHERE cm.class_id = $1 ORDER BY s.full_name', [id]);
         res.status(200).json(result.rows);
@@ -143,6 +193,15 @@ const getClassMembers = async (req, res) => {
 exports.getClassMembers = getClassMembers;
 const getClassSessions = async (req, res) => {
     try {
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const checkClassId = req.params.id;
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+                return;
+            }
+        }
         const { id } = req.params;
         const result = await db_1.default.query(`SELECT * FROM sessions WHERE class_id = $1 ORDER BY session_date DESC`, [id]);
         console.log(`[getClassSessions] class_id=${id}, result length=${result.rows.length}`);
@@ -156,18 +215,28 @@ exports.getClassSessions = getClassSessions;
 const getSessionAttendance = async (req, res) => {
     try {
         const { id } = req.params; // session_id
-        // 1. Get session info
+        const user = req.user;
+        // Check ownership
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền truy cập điểm danh này" });
+                return;
+            }
+        }
         const sessionRes = await db_1.default.query('SELECT class_id, session_date FROM sessions WHERE id = $1', [id]);
         if (sessionRes.rows.length === 0) {
             res.status(404).json({ message: "Không tìm thấy buổi học" });
             return;
         }
         const { class_id, session_date } = sessionRes.rows[0];
-        // 2. Query attendance
-        const result = await db_1.default.query(`SELECT a.*, s.full_name, s.id as student_code
-       FROM attendance a 
-       JOIN students s ON a.student_id = s.id 
-       WHERE a.class_id = $1 AND a.attendance_date = $2 ORDER BY s.full_name`, [class_id, session_date]);
+        // 2. Query all enrolled students, left join attendance
+        const result = await db_1.default.query(`SELECT e.student_id, s.full_name, s.id as student_code, a.id as attendance_id, a.status, a.notes, a.absent_reason
+       FROM enrollments e
+       JOIN students s ON e.student_id = s.id
+       LEFT JOIN attendance a ON a.student_id = e.student_id AND a.class_id = $1 AND a.attendance_date = $2
+       WHERE e.class_id = $1 AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học' OR e.status NOT IN ('Đã nghỉ', 'Bảo lưu', 'INACTIVE'))
+       ORDER BY s.full_name`, [class_id, session_date]);
         res.json(result.rows);
     }
     catch (err) {
@@ -180,7 +249,29 @@ const addMember = async (req, res) => {
     const { id } = req.params; // class_id
     const { student_id } = req.body;
     try {
-        const result = await db_1.default.query(`INSERT INTO enrollments (class_id, student_id) VALUES ($1, $2) RETURNING *`, [id, student_id]);
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const checkClassId = req.params.id;
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [checkClassId, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền quản lý lớp này" });
+                return;
+            }
+        }
+        const checkExist = await db_1.default.query('SELECT id, status FROM enrollments WHERE class_id = $1 AND student_id = $2', [id, student_id]);
+        if (checkExist.rows.length > 0) {
+            const currentStatus = checkExist.rows[0].status;
+            if (currentStatus === 'Đang học' || currentStatus === 'ACTIVE' || !currentStatus) {
+                res.status(400).json({ message: "Học sinh đã có trong lớp này" });
+                return;
+            }
+            else {
+                const updated = await db_1.default.query("UPDATE enrollments SET status = 'Đang học', enrollment_date = NOW() WHERE id = $1 RETURNING *", [checkExist.rows[0].id]);
+                res.status(200).json({ message: "Đã thêm lại học sinh vào lớp", member: updated.rows[0] });
+                return;
+            }
+        }
+        const result = await db_1.default.query(`INSERT INTO enrollments (class_id, student_id, status, enrollment_date) VALUES ($1, $2, 'Đang học', NOW()) RETURNING *`, [id, student_id]);
         res.status(201).json({ message: "Đã thêm học sinh vào lớp", member: result.rows[0] });
     }
     catch (error) {
@@ -193,18 +284,71 @@ const addMember = async (req, res) => {
     }
 };
 exports.addMember = addMember;
+// DELETE /api/classes/:id/members/:studentId
+const removeMember = async (req, res) => {
+    const { id, studentId } = req.params; // class_id, student_id
+    try {
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền quản lý lớp này hoặc lớp không tồn tại" });
+                return;
+            }
+        }
+        else if (user?.role === 'ADMIN') {
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1', [id]);
+            if (check.rows.length === 0) {
+                res.status(404).json({ message: "Không tìm thấy lớp học" });
+                return;
+            }
+        }
+        const checkEnroll = await db_1.default.query('SELECT id FROM enrollments WHERE class_id = $1 AND student_id = $2', [id, studentId]);
+        if (checkEnroll.rows.length === 0) {
+            res.status(404).json({ message: "Học sinh không có trong lớp học này" });
+            return;
+        }
+        // Delete enrollment record for this class (DO NOT delete the student account or other class enrollments)
+        await db_1.default.query('DELETE FROM enrollments WHERE class_id = $1 AND student_id = $2', [id, studentId]);
+        res.status(200).json({ message: "Đã xóa học sinh khỏi lớp thành công" });
+    }
+    catch (error) {
+        console.error("Lỗi xóa học sinh khỏi lớp:", error);
+        res.status(500).json({ message: "Lỗi server khi xóa học sinh khỏi lớp" });
+    }
+};
+exports.removeMember = removeMember;
 // POST /api/classes/:id/sessions
 const createSession = async (req, res) => {
     const { id } = req.params; // class_id
-    const { session_date, start_time, end_time, content } = req.body;
+    const { session_date, start_time, end_time, content, homework } = req.body;
+    if (!session_date) {
+        res.status(400).json({ message: "Vui lòng chọn ngày học" });
+        return;
+    }
     const client = await db_1.default.connect();
     try {
+        const user = req.user;
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1 AND teacher_id = $2', [id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền quản lý lớp này hoặc lớp không tồn tại" });
+                return;
+            }
+        }
+        else if (user?.role === 'ADMIN') {
+            const check = await db_1.default.query('SELECT id FROM classes WHERE id = $1', [id]);
+            if (check.rows.length === 0) {
+                res.status(404).json({ message: "Lớp học không tồn tại" });
+                return;
+            }
+        }
         await client.query('BEGIN');
         // 1. Tạo buổi học
-        const sessionRes = await client.query(`INSERT INTO sessions (class_id, session_date, start_time, end_time, content) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`, [id, session_date, start_time, end_time, content]);
+        const sessionRes = await client.query(`INSERT INTO sessions (class_id, session_date, start_time, content, homework, is_published) 
+       VALUES ($1, $2, $3, $4, $5, false) RETURNING *`, [id, session_date, start_time || '18:00', content || null, homework || null]);
         const session = sessionRes.rows[0];
-        // Google Calendar Sync
+        // Google Calendar Sync (optional, non-blocking)
         try {
             const teacherId = req.user?.id;
             if (teacherId) {
@@ -220,36 +364,40 @@ const createSession = async (req, res) => {
              JOIN enrollments cm ON s.id = cm.student_id
              WHERE cm.class_id = $1 AND cm.status = 'ACTIVE' AND s.is_active = true AND s.email IS NOT NULL`, [id]);
                     const attendees = emailsRes.rows.map(r => ({ email: r.email }));
+                    const dateStr = session_date.includes('T') ? session_date.split('T')[0] : session_date;
+                    const startClean = (start_time || '18:00').substring(0, 5) + ':00';
+                    const endClean = (end_time || '19:30').substring(0, 5) + ':00';
                     const event = await calendar.events.insert({
                         calendarId: 'primary',
                         requestBody: {
                             summary: content || 'Lịch học',
-                            start: { dateTime: session_date + 'T' + (start_time || '18:00') + ':00+07:00', timeZone: 'Asia/Ho_Chi_Minh' },
-                            end: { dateTime: session_date + 'T' + (end_time || '19:30') + ':00+07:00', timeZone: 'Asia/Ho_Chi_Minh' },
+                            start: { dateTime: `${dateStr}T${startClean}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
+                            end: { dateTime: `${dateStr}T${endClean}+07:00`, timeZone: 'Asia/Ho_Chi_Minh' },
                             attendees: attendees.length > 0 ? attendees : undefined
                         }
                     });
-                    await client.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [event.data.id, session.id]);
+                    if (event.data?.id) {
+                        await client.query('UPDATE sessions SET google_event_id = $1 WHERE id = $2', [event.data.id, session.id]);
+                        session.google_event_id = event.data.id;
+                    }
                 }
             }
         }
         catch (googleErr) {
             console.error("Lỗi đồng bộ Google Calendar khi tạo buổi học:", googleErr);
-            // KHÔNG rollback session, chỉ log lỗi
-        }
-        // 2. Lấy danh sách học sinh đang có trong lớp
-        const membersRes = await client.query(`SELECT student_id FROM enrollments WHERE class_id = $1 AND status = 'ACTIVE'`, [id]);
-        // 3. Tự động sinh danh sách điểm danh với status = 'PRESENT'
-        for (const member of membersRes.rows) {
-            await client.query(`INSERT INTO attendance (session_id, student_id, status) VALUES ($1, $2, 'PRESENT')`, [session.id, member.student_id]);
         }
         await client.query('COMMIT');
-        res.status(201).json({ message: "Tạo buổi học thành công", session });
+        res.status(201).json({
+            message: "Tạo buổi học thành công",
+            session
+        });
     }
     catch (error) {
         await client.query('ROLLBACK');
-        console.error(error);
-        res.status(500).json({ message: "Lỗi server khi tạo buổi học" });
+        console.error('Lỗi tạo buổi học:', error);
+        res.status(500).json({
+            message: "Lỗi server khi tạo buổi học"
+        });
     }
     finally {
         client.release();
@@ -259,9 +407,17 @@ exports.createSession = createSession;
 // PUT /api/sessions/:id/attendance (Được định tuyến qua classRoutes hoặc sessionRoutes)
 const updateAttendance = async (req, res) => {
     const { id } = req.params; // session_id
-    const { student_id, status, note } = req.body;
+    const { student_id, status, note, absent_reason } = req.body;
     try {
-        // 1. Lấy thông tin session
+        const user = req.user;
+        // Check ownership
+        if (user?.role === 'TEACHER') {
+            const check = await db_1.default.query('SELECT c.id FROM sessions s JOIN classes c ON s.class_id = c.id WHERE s.id = $1 AND c.teacher_id = $2', [id, user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Bạn không có quyền điểm danh lớp này" });
+                return;
+            }
+        }
         const sessionRes = await db_1.default.query('SELECT class_id, session_date FROM sessions WHERE id = $1', [id]);
         if (sessionRes.rows.length === 0) {
             res.status(404).json({ message: "Không tìm thấy buổi học" });

@@ -6,6 +6,7 @@ export declare const saveDraftExam: (req: AuthRequest, res: Response) => Promise
 export declare const submitExam: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const getExamSubmissions: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const getMySubmissions: (req: AuthRequest, res: Response) => Promise<void>;
+export declare const getSubmissionDetail: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const getExamKey: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const createExamFromText: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const parseExamFromFile: (req: AuthRequest, res: Response) => Promise<void>;

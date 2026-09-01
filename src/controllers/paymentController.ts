@@ -165,6 +165,60 @@ export const markBillAsPaid = async (req: AuthRequest, res: Response): Promise<v
   }
 };
 
+// 5.1 Xóa / Hủy phiếu thu học phí
+export const deleteBill = async (req: AuthRequest, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const user = req.user;
+  const client = await pool.connect();
+  try {
+    if (user?.role === 'TEACHER') {
+      const check = await client.query(
+        `SELECT 1 FROM tuition_bills b
+         JOIN students s ON b.student_id = s.id
+         LEFT JOIN enrollments e ON s.id = e.student_id
+         LEFT JOIN classes c ON e.class_id = c.id
+         WHERE b.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`,
+        [id, user.id]
+      );
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền xóa phiếu thu này" });
+        return;
+      }
+    }
+
+    await client.query('BEGIN');
+    const billRes = await client.query('SELECT student_id, start_date, end_date FROM tuition_bills WHERE id = $1', [id]);
+    if (billRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ message: "Không tìm thấy phiếu thu" });
+      return;
+    }
+
+    const bill = billRes.rows[0];
+
+    // Unmark session evaluations so they can be re-billed if needed
+    if (bill.start_date && bill.end_date) {
+      await client.query(
+        `UPDATE session_evaluations SET is_billed = FALSE 
+         WHERE student_id = $1 AND session_id IN (
+           SELECT id FROM sessions WHERE session_date >= $2 AND session_date <= $3
+         )`,
+        [bill.student_id, bill.start_date, bill.end_date]
+      );
+    }
+
+    await client.query('DELETE FROM tuition_bills WHERE id = $1', [id]);
+    await client.query('COMMIT');
+    res.status(200).json({ message: 'Đã xóa phiếu thu học phí thành công' });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('Lỗi deleteBill:', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+
 // 6. Gắn điểm thi vào hóa đơn (MỚI)
 export const addExamScores = async (req: AuthRequest, res: Response): Promise<void> => {
   const scoresArray = req.body;

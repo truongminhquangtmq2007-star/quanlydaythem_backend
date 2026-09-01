@@ -15,7 +15,7 @@ import {
   getClass
 } from '../controllers/classController';
 import { getAssignableDocuments, assignDocumentsToClass } from '../controllers/classDocumentController';
-import { getClassAssignments } from '../controllers/assignmentController';
+import { getClassAssignments, deleteAssignment } from '../controllers/assignmentController';
 import { verifyToken, isTeacherOrAdmin, isAdmin } from '../middleware/authMiddleware';
 
 const router = Router();
@@ -39,6 +39,8 @@ router.get('/:id/sessions', verifyToken, isTeacherOrAdmin, getClassSessions);
 router.post('/:id/sessions', verifyToken, isTeacherOrAdmin, createSession);
 
 router.get('/:id/assignments', verifyToken, isTeacherOrAdmin, getClassAssignments);
+router.delete('/:id/assignments/:assignmentId', verifyToken, isTeacherOrAdmin, deleteAssignment);
+router.delete('/assignments/:id', verifyToken, isTeacherOrAdmin, deleteAssignment);
 
 router.get('/sessions/:id/attendance', verifyToken, isTeacherOrAdmin, getSessionAttendance);
 router.put('/sessions/:id/attendance', verifyToken, isTeacherOrAdmin, updateAttendance);
