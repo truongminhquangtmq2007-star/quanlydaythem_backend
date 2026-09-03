@@ -230,9 +230,23 @@ export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<vo
             );
         } else {
             await pool.query(
-                `INSERT INTO exam_submissions (document_id, student_id, student_answers, time_taken_seconds, status, last_saved_at) VALUES ($1, $2, $3, $4, 'IN_PROGRESS', NOW())`,
-                [examId, studentId, JSON.stringify(answers), time_taken_seconds || 0]
-            );
+    `INSERT INTO exam_submissions (
+        document_id,
+        student_id,
+        student_answers,
+        total_score,
+        time_taken_seconds,
+        status,
+        last_saved_at
+    ) VALUES ($1, $2, $3, $4, $5, 'IN_PROGRESS', NOW())`,
+    [
+        examId,
+        studentId,
+        JSON.stringify(answers),
+        0,
+        time_taken_seconds || 0
+    ]
+);
         }
         res.status(200).json({ message: 'Đã lưu nháp' });
     } catch (error) {
