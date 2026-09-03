@@ -67,7 +67,7 @@ export const getWeeklyReport = async (req: AuthRequest, res: Response): Promise<
 
         // 4. Phân tích chuyên đề (Tất cả hoặc tuần qua - ta lấy tổng quan để báo cáo)
         const topicsRes = await pool.query(
-            `SELECT topic_name AS topic, accuracy_rate 
+            `SELECT topic, accuracy_rate 
              FROM student_topic_performance 
              WHERE student_id = $1 
              ORDER BY accuracy_rate DESC`, 
