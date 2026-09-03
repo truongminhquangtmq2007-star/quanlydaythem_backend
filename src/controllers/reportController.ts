@@ -45,7 +45,7 @@ export const getWeeklyReport = async (req: AuthRequest, res: Response): Promise<
         const examsRes = await pool.query(
             `SELECT total_score, created_at 
              FROM exam_submissions 
-             WHERE student_id = $1 AND created_at >= NOW() - INTERVAL '7 days'`, 
+             WHERE student_id = $1 AND submitted_at >= NOW() - INTERVAL '7 days'`, 
             [id]
         );
         const exams = examsRes.rows;
@@ -57,7 +57,7 @@ export const getWeeklyReport = async (req: AuthRequest, res: Response): Promise<
         const attendanceRes = await pool.query(
             `SELECT status 
              FROM attendance 
-             WHERE student_id = $1 AND date >= NOW() - INTERVAL '7 days'`, 
+             WHERE student_id = $1 AND attendance_date >= NOW() - INTERVAL '7 days'`, 
             [id]
         );
         const attendances = attendanceRes.rows;
