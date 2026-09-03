@@ -81,15 +81,22 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
         let upcomingSessions = [];
         try {
             const scheduleRes = await pool.query(
-                `SELECT s.id, s.session_date, s.start_time, c.class_name
-                FROM sessions s
-                JOIN classes c ON s.class_id = c.id
-                JOIN enrollments e ON e.class_id = c.id
-                WHERE e.student_id = $1 AND s.session_date >= CURRENT_DATE
-                ORDER BY s.session_date ASC, s.start_time ASC
-                LIMIT 5`,
-                [studentId]
-            );
+    `SELECT
+        s.id,
+        s.session_date,
+        s.start_time,
+        c.class_name,
+        c.class_type,
+        c.meet_link
+    FROM sessions s
+    JOIN classes c ON s.class_id = c.id
+    JOIN enrollments e ON e.class_id = c.id
+    WHERE e.student_id = $1
+      AND s.session_date >= CURRENT_DATE
+    ORDER BY s.session_date ASC, s.start_time ASC
+    LIMIT 5`,
+    [studentId]
+);
             upcomingSessions = scheduleRes.rows;
         } catch(e) { console.error(e); }
 
