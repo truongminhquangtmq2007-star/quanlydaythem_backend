@@ -77,11 +77,11 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
             }
         } catch(e) { console.error("Lỗi lấy chuyên đề yếu:", e); }
 
-        // Lịch học sắp tới
+        // Lịch học sắp tới (DISTINCT chống nhân bản dòng do enrollment thừa)
         let upcomingSessions = [];
         try {
             const scheduleRes = await pool.query(
-                `SELECT s.id, s.session_date, s.start_time, c.class_name, c.class_type, c.meet_link
+                `SELECT DISTINCT s.id, s.session_date, s.start_time, c.class_name, c.class_type, c.meet_link
                 FROM sessions s
                 JOIN classes c ON s.class_id = c.id
                 JOIN enrollments e ON e.class_id = c.id
@@ -136,7 +136,7 @@ export const getSchedule = async (req: AuthRequest, res: Response): Promise<void
         }
 
         const query = `
-            SELECT s.id, s.session_date, s.start_time, c.class_name, c.class_type, c.meet_link
+            SELECT DISTINCT s.id, s.session_date, s.start_time, c.class_name, c.class_type, c.meet_link
             FROM sessions s
             JOIN classes c ON s.class_id = c.id
             JOIN enrollments e ON e.class_id = c.id

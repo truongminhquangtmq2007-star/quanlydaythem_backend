@@ -12,14 +12,14 @@ export const explainError = async (req: AuthRequest, res: Response): Promise<voi
             return;
         }
 
-        let targetStudentId = req.user?.student_id;
+        let targetStudentId = req.user?.student_id || req.user?.id;
         if (req.user?.role === 'STUDENT') {
             // Student can only query for themselves
-            if (student_id && Number(student_id) !== Number(req.user?.student_id)) {
+            if (student_id && Number(student_id) !== Number(req.user?.student_id || req.user?.id)) {
                 res.status(403).json({ message: 'Không có quyền truy cập dữ liệu của học sinh khác.' });
                 return;
             }
-            targetStudentId = req.user?.student_id;
+            targetStudentId = req.user?.student_id || req.user?.id;
         } else if (student_id) {
             targetStudentId = student_id;
         }
@@ -135,15 +135,15 @@ export const generateRemark = async (req: AuthRequest, res: Response): Promise<v
 
         // Lấy dữ liệu topic
         const topicRes = await pool.query(
-            `SELECT topic, accuracy_rate FROM student_topic_performance WHERE student_id = $1 ORDER BY accuracy_rate DESC`,
+            `SELECT topic_name, accuracy_rate FROM student_topic_performance WHERE student_id = $1 ORDER BY accuracy_rate DESC`,
             [student_id]
         );
         
         let strongTopics: string[] = [];
         let weakTopics: string[] = [];
         if (topicRes.rows.length > 0) {
-            strongTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) >= 80).map(t => t.topic);
-            weakTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) < 50).map(t => t.topic);
+            strongTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) >= 80).map(t => t.topic_name);
+            weakTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) < 50).map(t => t.topic_name);
         }
 
         const dataSummary = {
