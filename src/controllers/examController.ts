@@ -1444,7 +1444,7 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
         } else if (clientPart === 'part1') {
             qData = (examContent.part1 || []).find((q: any) => String(q.id) === String(question_id));
         }
-        if (!qData) {
+        if (!qData && !clientPart) {
             qData = allQuestions.find((q: any) => String(q.id) === String(question_id));
         }
 
@@ -1455,9 +1455,21 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
 
         // 2. Tìm Shared Context (nếu có)
         const sharedList = examContent.sharedContexts || examContent.shared_context || [];
-        const sharedCtx = qData.context_id 
-            ? sharedList.find((g: any) => String(g.id) === String(qData.context_id) || String(g.context_id) === String(qData.context_id))
-            : sharedList.find((g: any) => (g.questionIds || g.question_ids || []).map(Number).includes(Number(question_id)));
+        let sharedCtx: any = null;
+        if (qData.context_id) {
+            sharedCtx = sharedList.find((g: any) => String(g.id) === String(qData.context_id) || String(g.context_id) === String(qData.context_id));
+        }
+        if (!sharedCtx) {
+            const actualPart = clientPart || (
+                (examContent.part2 || []).some((q: any) => String(q.id) === String(qData.id)) ? 'part2' :
+                (examContent.part3 || []).some((q: any) => String(q.id) === String(qData.id)) ? 'part3' : 'part1'
+            );
+            sharedCtx = sharedList.find((g: any) => {
+                const qIds = (g.questionIds || g.question_ids || []).map(Number);
+                const partMatches = !g.part || g.part === actualPart;
+                return partMatches && qIds.includes(Number(question_id));
+            });
+        }
         const sharedContextText = sharedCtx ? `\n[NGỮ LIỆU ĐỌC HIỂU DÙNG CHO CÂU NÀY]: ${sharedCtx.content}` : '';
 
         // 3. Lấy thông tin bài làm của học sinh (nếu đã nộp)
