@@ -22,7 +22,7 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
         let examsCount = 0;
         try {
             const examsRes = await pool.query(
-                `SELECT total_score FROM exam_submissions WHERE student_id = $1 AND submitted_at >= NOW() - INTERVAL '30 days'`,
+                `SELECT total_score FROM exam_submissions WHERE student_id = $1 AND status = 'COMPLETED' AND submitted_at >= NOW() - INTERVAL '30 days'`,
                 [studentId]
             );
             if (examsRes.rows.length > 0) {
@@ -49,7 +49,7 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
         let weakTopics: any[] = [];
         try {
             const topicsRes = await pool.query(
-                `SELECT topic_performance FROM exam_submissions WHERE student_id = $1 AND topic_performance IS NOT NULL LIMIT 20`,
+                `SELECT topic_performance FROM exam_submissions WHERE student_id = $1 AND status = 'COMPLETED' AND topic_performance IS NOT NULL LIMIT 20`,
                 [studentId]
             );
             if (topicsRes.rows.length > 0) {
@@ -77,15 +77,17 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
             }
         } catch(e) { console.error("Lỗi lấy chuyên đề yếu:", e); }
 
-                // Lịch học sắp tới
+        // Lịch học sắp tới
         let upcomingSessions = [];
         try {
             const scheduleRes = await pool.query(
-                `SELECT s.id, s.session_date, s.start_time, c.class_name
+                `SELECT s.id, s.session_date, s.start_time, c.class_name, c.class_type, c.meet_link
                 FROM sessions s
                 JOIN classes c ON s.class_id = c.id
                 JOIN enrollments e ON e.class_id = c.id
-                WHERE e.student_id = $1 AND s.session_date >= CURRENT_DATE
+                WHERE e.student_id = $1 
+                  AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+                  AND s.session_date >= CURRENT_DATE
                 ORDER BY s.session_date ASC, s.start_time ASC
                 LIMIT 5`,
                 [studentId]
@@ -134,11 +136,13 @@ export const getSchedule = async (req: AuthRequest, res: Response): Promise<void
         }
 
         const query = `
-            SELECT s.id, s.session_date, s.start_time, c.class_name
+            SELECT s.id, s.session_date, s.start_time, c.class_name, c.class_type, c.meet_link
             FROM sessions s
             JOIN classes c ON s.class_id = c.id
             JOIN enrollments e ON e.class_id = c.id
-            WHERE e.student_id = $1 AND s.session_date >= CURRENT_DATE
+            WHERE e.student_id = $1 
+              AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+              AND s.session_date >= CURRENT_DATE
             ORDER BY s.session_date ASC, s.start_time ASC
             LIMIT 10
         `;

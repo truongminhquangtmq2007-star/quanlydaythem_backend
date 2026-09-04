@@ -19,7 +19,7 @@ const getDashboard = async (req, res) => {
         let avgScore = 'Chưa có';
         let examsCount = 0;
         try {
-            const examsRes = await db_1.default.query(`SELECT total_score FROM exam_submissions WHERE student_id = $1 AND submitted_at >= NOW() - INTERVAL '30 days'`, [studentId]);
+            const examsRes = await db_1.default.query(`SELECT total_score FROM exam_submissions WHERE student_id = $1 AND status = 'COMPLETED' AND submitted_at >= NOW() - INTERVAL '30 days'`, [studentId]);
             if (examsRes.rows.length > 0) {
                 avgScore = (examsRes.rows.reduce((sum, e) => sum + Number(e.total_score || 0), 0) / examsRes.rows.length).toFixed(1);
             }
@@ -44,7 +44,7 @@ const getDashboard = async (req, res) => {
         // Chuyên đề yếu: Lấy từ topic_performance trong exam_submissions (cột JSONB đã được ADD IF NOT EXISTS)
         let weakTopics = [];
         try {
-            const topicsRes = await db_1.default.query(`SELECT topic_performance FROM exam_submissions WHERE student_id = $1 AND topic_performance IS NOT NULL LIMIT 20`, [studentId]);
+            const topicsRes = await db_1.default.query(`SELECT topic_performance FROM exam_submissions WHERE student_id = $1 AND status = 'COMPLETED' AND topic_performance IS NOT NULL LIMIT 20`, [studentId]);
             if (topicsRes.rows.length > 0) {
                 // Tổng hợp từ tất cả bài thi
                 const aggregate = {};
@@ -76,11 +76,13 @@ const getDashboard = async (req, res) => {
         // Lịch học sắp tới
         let upcomingSessions = [];
         try {
-            const scheduleRes = await db_1.default.query(`SELECT s.id, s.session_date, s.start_time, c.class_name
+            const scheduleRes = await db_1.default.query(`SELECT s.id, s.session_date, s.start_time, c.class_name, c.class_type, c.meet_link
                 FROM sessions s
                 JOIN classes c ON s.class_id = c.id
                 JOIN enrollments e ON e.class_id = c.id
-                WHERE e.student_id = $1 AND s.session_date >= CURRENT_DATE
+                WHERE e.student_id = $1 
+                  AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+                  AND s.session_date >= CURRENT_DATE
                 ORDER BY s.session_date ASC, s.start_time ASC
                 LIMIT 5`, [studentId]);
             upcomingSessions = scheduleRes.rows;
@@ -128,11 +130,13 @@ const getSchedule = async (req, res) => {
             return;
         }
         const query = `
-            SELECT s.id, s.session_date, s.start_time, c.class_name
+            SELECT s.id, s.session_date, s.start_time, c.class_name, c.class_type, c.meet_link
             FROM sessions s
             JOIN classes c ON s.class_id = c.id
             JOIN enrollments e ON e.class_id = c.id
-            WHERE e.student_id = $1 AND s.session_date >= CURRENT_DATE
+            WHERE e.student_id = $1 
+              AND (e.status IS NULL OR e.status = 'ACTIVE' OR e.status = 'Đang học')
+              AND s.session_date >= CURRENT_DATE
             ORDER BY s.session_date ASC, s.start_time ASC
             LIMIT 10
         `;
