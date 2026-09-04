@@ -80,6 +80,16 @@ const generateRemark = async (req, res) => {
             res.status(400).json({ message: 'Thiếu student_id hoặc month (định dạng YYYY-MM).' });
             return;
         }
+        if (req.user?.role === 'TEACHER') {
+            const check = await db_1.default.query(`SELECT 1 FROM students s
+                 LEFT JOIN enrollments e ON s.id = e.student_id
+                 LEFT JOIN classes c ON e.class_id = c.id
+                 WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [student_id, req.user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền tạo nhận xét cho học sinh này." });
+                return;
+            }
+        }
         const studentRes = await db_1.default.query('SELECT full_name, learning_goals FROM students WHERE id = $1', [student_id]);
         if (studentRes.rows.length === 0) {
             res.status(404).json({ message: 'Không tìm thấy học sinh.' });
@@ -99,19 +109,19 @@ const generateRemark = async (req, res) => {
             if (r.status === 'LATE')
                 late = parseInt(r.count, 10);
         });
-        // Lấy dữ liệu thi cử trong tháng
+        // Lấy dữ liệu thi cử trong tháng (chỉ lấy bài thi đã hoàn thành)
         const examRes = await db_1.default.query(`SELECT AVG(total_score) as avg_score, COUNT(*) as total_exams 
              FROM exam_submissions 
-             WHERE student_id = $1 AND to_char(submitted_at, 'YYYY-MM') = $2`, [student_id, month]);
+             WHERE student_id = $1 AND status = 'COMPLETED' AND to_char(submitted_at, 'YYYY-MM') = $2`, [student_id, month]);
         const avgScore = examRes.rows[0]?.avg_score ? parseFloat(examRes.rows[0].avg_score).toFixed(2) : null;
         const totalExams = parseInt(examRes.rows[0]?.total_exams || '0', 10);
         // Lấy dữ liệu topic
-        const topicRes = await db_1.default.query(`SELECT topic_name, accuracy_rate FROM student_topic_performance WHERE student_id = $1 ORDER BY accuracy_rate DESC`, [student_id]);
+        const topicRes = await db_1.default.query(`SELECT topic, accuracy_rate FROM student_topic_performance WHERE student_id = $1 ORDER BY accuracy_rate DESC`, [student_id]);
         let strongTopics = [];
         let weakTopics = [];
         if (topicRes.rows.length > 0) {
-            strongTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) >= 80).map(t => t.topic_name);
-            weakTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) < 50).map(t => t.topic_name);
+            strongTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) >= 80).map(t => t.topic);
+            weakTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) < 50).map(t => t.topic);
         }
         const dataSummary = {
             attendance: { present, absent, late },
@@ -150,6 +160,16 @@ exports.generateRemark = generateRemark;
 const getRemark = async (req, res) => {
     try {
         const { studentId, month } = req.params;
+        if (req.user?.role === 'TEACHER') {
+            const check = await db_1.default.query(`SELECT 1 FROM students s
+                 LEFT JOIN enrollments e ON s.id = e.student_id
+                 LEFT JOIN classes c ON e.class_id = c.id
+                 WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [studentId, req.user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền xem nhận xét của học sinh này." });
+                return;
+            }
+        }
         const result = await db_1.default.query('SELECT remark_text FROM monthly_student_reports WHERE student_id = $1 AND month = $2', [studentId, month]);
         if (result.rows.length > 0) {
             res.status(200).json({ remark: result.rows[0].remark_text });
@@ -170,6 +190,16 @@ const saveRemark = async (req, res) => {
         if (!student_id || !month || !remark_text) {
             res.status(400).json({ message: 'Thiếu thông tin bắt buộc.' });
             return;
+        }
+        if (req.user?.role === 'TEACHER') {
+            const check = await db_1.default.query(`SELECT 1 FROM students s
+                 LEFT JOIN enrollments e ON s.id = e.student_id
+                 LEFT JOIN classes c ON e.class_id = c.id
+                 WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [student_id, req.user.id]);
+            if (check.rows.length === 0) {
+                res.status(403).json({ message: "Không có quyền lưu nhận xét cho học sinh này." });
+                return;
+            }
         }
         const dataSumJson = data_summary ? JSON.stringify(data_summary) : '{}';
         await db_1.default.query(`INSERT INTO monthly_student_reports (student_id, month, remark_text, data_summary, edited_by, updated_at) 
