@@ -20,8 +20,8 @@ const getWeeklyReport = async (req, res) => {
                 return;
             }
         }
-        // 1. Thông tin học sinh
-        const studentRes = await db_1.default.query(`SELECT full_name, student_code, school, grade, learning_goals FROM students WHERE id = $1`, [id]);
+        // 1. Thông tin học sinh (chuẩn schema: school_name)
+        const studentRes = await db_1.default.query(`SELECT full_name, school_name AS school, learning_goals FROM students WHERE id = $1`, [id]);
         if (studentRes.rows.length === 0) {
             res.status(404).json({ message: 'Không tìm thấy học sinh' });
             return;
@@ -35,24 +35,24 @@ const getWeeklyReport = async (req, res) => {
             classType = classRes.rows[0].class_type;
             meetLink = classRes.rows[0].meet_link || '';
         }
-        // 2. Kết quả thi (7 ngày qua)
-        const examsRes = await db_1.default.query(`SELECT total_score, created_at 
+        // 2. Kết quả thi (7 ngày qua, chỉ tính bài hoàn thành)
+        const examsRes = await db_1.default.query(`SELECT total_score, submitted_at 
              FROM exam_submissions 
-             WHERE student_id = $1 AND created_at >= NOW() - INTERVAL '7 days'`, [id]);
+             WHERE student_id = $1 AND status = 'COMPLETED' AND submitted_at >= NOW() - INTERVAL '7 days'`, [id]);
         const exams = examsRes.rows;
         const avgScore = exams.length > 0
-            ? (exams.reduce((sum, e) => sum + Number(e.total_score), 0) / exams.length).toFixed(1)
+            ? (exams.reduce((sum, e) => sum + Number(e.total_score || 0), 0) / exams.length).toFixed(1)
             : '0';
-        // 3. Chuyên cần (7 ngày qua)
+        // 3. Chuyên cần (7 ngày qua, chuẩn schema: attendance_date)
         const attendanceRes = await db_1.default.query(`SELECT status 
              FROM attendance 
-             WHERE student_id = $1 AND date >= NOW() - INTERVAL '7 days'`, [id]);
+             WHERE student_id = $1 AND attendance_date >= CURRENT_DATE - INTERVAL '7 days'`, [id]);
         const attendances = attendanceRes.rows;
         const totalSessions = attendances.length;
         const presentSessions = attendances.filter(a => a.status === 'PRESENT').length;
         const attendanceRate = totalSessions > 0 ? Math.round((presentSessions / totalSessions) * 100) : 100;
-        // 4. Phân tích chuyên đề (Tất cả hoặc tuần qua - ta lấy tổng quan để báo cáo)
-        const topicsRes = await db_1.default.query(`SELECT topic_name AS topic, accuracy_rate 
+        // 4. Phân tích chuyên đề (chuẩn schema: topic)
+        const topicsRes = await db_1.default.query(`SELECT topic, accuracy_rate 
              FROM student_topic_performance 
              WHERE student_id = $1 
              ORDER BY accuracy_rate DESC`, [id]);
@@ -82,8 +82,15 @@ Yêu cầu:
 2. Đánh giá dựa trên Hình thức lớp học (Online/Offline) và liên kết với Mục tiêu ngắn hạn.
 3. Chỉ ra sự tiến bộ và đưa ra 1-2 chiến thuật cụ thể để cải thiện điểm yếu.
 4. Ngắn gọn trong vòng 150 - 250 từ. Trình bày bằng Markdown chuyên nghiệp, có highlight bôi đậm.`;
-        // Gọi AI
-        const aiReport = await (0, geminiService_1.explainErrorWithAI)(prompt);
+        // Gọi AI với fallback an toàn
+        let aiReport = '';
+        try {
+            aiReport = await (0, geminiService_1.explainErrorWithAI)(prompt);
+        }
+        catch (aiErr) {
+            console.warn("AI generation fallback for weekly report:", aiErr);
+            aiReport = `### 📋 Báo cáo học tập tuần qua - Em **${student.full_name}**\n\n- **Chuyên cần:** Tham gia ${presentSessions}/${totalSessions} buổi học (${attendanceRate}%).\n- **Bài kiểm tra:** Hoàn thành ${exams.length} bài thi, điểm trung bình đạt **${avgScore}/10**.\n- **Chuyên đề tốt:** ${strongTopics.join(', ') || 'Đang rèn luyện'}\n- **Cần cải thiện:** ${weakTopics.join(', ') || 'Đang duy trì ổn định'}\n\n*Lời khuyên:* Tiếp tục phát huy tinh thần tự giác làm bài tập và chuẩn bị kỹ các nội dung trước buổi học!`;
+        }
         res.status(200).json({
             student,
             stats: {
