@@ -238,7 +238,7 @@ export const deleteDocument = async (req: AuthRequest, res: Response): Promise<v
       // Hard-delete if no submissions exist
       await pool.query('DELETE FROM assignments WHERE document_id = $1', [id]);
       await pool.query('DELETE FROM exam_keys WHERE document_id = $1', [id]);
-      await pool.query('DELETE FROM question_contexts WHERE document_id = $1', [id]);
+      await pool.query('DELETE FROM questions WHERE quiz_id = $1', [id]);
       await pool.query('DELETE FROM documents WHERE id = $1', [id]);
     }
     

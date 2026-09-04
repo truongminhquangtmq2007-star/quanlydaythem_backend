@@ -58,35 +58,42 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
         const sharedList = Array.isArray(rawShared) ? rawShared : rawShared ? [rawShared] : [];
 
         if (sharedList.length > 0) {
-            await client.query('DELETE FROM question_contexts WHERE document_id = $1', [document_id]);
-
+            let ctxCounter = 1;
             for (const item of sharedList) {
                 const content = item.content || item.text || (typeof item === 'string' ? item : '');
                 const imageUrl = item.image_url || null;
-                const part = item.part || 'part1';
-                const questionIds = item.questionIds || item.question_ids || [];
+                const questionIds = Array.isArray(item.questionIds) ? item.questionIds : (Array.isArray(item.question_ids) ? item.question_ids : []);
+                
+                // Xác định part chính xác: Không tự ý default part1 nếu questionIds thuộc part2 hoặc part3
+                let part = item.part;
+                if (!part || (part !== 'part1' && part !== 'part2' && part !== 'part3')) {
+                    const inP2 = (finalExamContent?.part2 || []).some((q: any) => questionIds.includes(q.id));
+                    const inP3 = (finalExamContent?.part3 || []).some((q: any) => questionIds.includes(q.id));
+                    const inP1 = (finalExamContent?.part1 || []).some((q: any) => questionIds.includes(q.id));
+                    if (inP2 && !inP1 && !inP3) part = 'part2';
+                    else if (inP3 && !inP1 && !inP2) part = 'part3';
+                    else part = 'part1';
+                }
 
-                const insertContextRes = await client.query(
-                    `INSERT INTO question_contexts (document_id, content, image_url, part, question_ids)
-                     VALUES ($1, $2, $3, $4, $5)
-                     RETURNING id`,
-                    [document_id, content, imageUrl, part, JSON.stringify(questionIds)]
-                );
-
-                const contextId = insertContextRes.rows[0]?.id;
+                const contextId = item.id || item.context_id || ctxCounter++;
                 if (!primaryContextId && contextId) {
                     primaryContextId = contextId;
                 }
 
                 item.id = contextId;
                 item.context_id = contextId;
+                item.part = part;
+                item.content = content;
+                item.image_url = imageUrl;
+                item.questionIds = questionIds;
 
                 if (finalExamContent) {
-                    const targetPart = (part === 'part2' ? finalExamContent.part2 : part === 'part3' ? finalExamContent.part3 : finalExamContent.part1) || [];
-                    targetPart.forEach((q: any) => {
-                        if (questionIds.includes(q.id)) {
-                            q.context_id = contextId;
-                        }
+                    ['part1', 'part2', 'part3'].forEach(pKey => {
+                        (finalExamContent[pKey] || []).forEach((q: any) => {
+                            if (questionIds.includes(q.id)) {
+                                q.context_id = contextId;
+                            }
+                        });
                     });
                 }
             }
@@ -189,6 +196,14 @@ const normalizeShortAnswer = (value: any): string => {
         .replace(',', '.');
 };
 
+const normalizeTrueFalse = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    const s = String(val).trim().toUpperCase();
+    if (s === 'Đ' || s === 'D' || s === 'ĐÚNG' || s === 'DUNG' || s === 'TRUE' || s === 'T' || s === '1') return 'Đ';
+    if (s === 'S' || s === 'SAI' || s === 'FALSE' || s === 'F' || s === '0') return 'S';
+    return s;
+};
+
 // ========================================================
 // 1B. API HỌC SINH: LƯU NHÁP VÀ KHÔI PHỤC (AUTO-SAVE)
 // ========================================================
@@ -217,7 +232,8 @@ export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<vo
     try {
         const studentId = req.user?.student_id || req.user?.id;
         const examId = req.params.id;
-        const { answers, time_taken_seconds } = req.body;
+        const { answers, student_answers, time_taken_seconds } = req.body;
+        const draftAnswers = answers !== undefined ? answers : (student_answers !== undefined ? student_answers : {});
         const exist = await pool.query(
             `SELECT id FROM exam_submissions WHERE student_id = $1 AND document_id = $2 AND status = 'IN_PROGRESS'`,
             [studentId, examId]
@@ -226,12 +242,12 @@ export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<vo
         if (exist.rows.length > 0) {
             await pool.query(
                 `UPDATE exam_submissions SET student_answers = $1, time_taken_seconds = $2, last_saved_at = NOW() WHERE id = $3`,
-                [JSON.stringify(answers), time_taken_seconds || 0, exist.rows[0].id]
+                [JSON.stringify(draftAnswers), time_taken_seconds || 0, exist.rows[0].id]
             );
         } else {
             await pool.query(
                 `INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, submitted_at, time_taken_seconds, status, last_saved_at) VALUES ($1, $2, $3, 0, 0, 0, 0, NULL, $4, 'IN_PROGRESS', NOW())`,
-                [examId, studentId, JSON.stringify(answers), time_taken_seconds || 0]
+                [examId, studentId, JSON.stringify(draftAnswers), time_taken_seconds || 0]
             );
         }
         res.status(200).json({ message: 'Đã lưu nháp' });
@@ -268,45 +284,234 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
         }
         
         const answerKey = keyResult.rows[0];
+        const examContent = answerKey.exam_content || {};
 
-        // Chuẩn hóa câu trả lời của học sinh từ payload
-        let p1Answers: { [key: string]: any } = {};
-        let p2Answers: { [key: string]: any } = {};
-        let p3Answers: { [key: string]: any } = {};
-        const flatAnswers: { [key: string]: any } = {};
+        // 1. Tải toàn bộ câu hỏi của đề thi này từ bảng questions (server-side truth)
+        const dbQuestionsRes = await pool.query(
+            `SELECT id, quiz_id, part_number, question_type, content, answer_data 
+             FROM questions 
+             WHERE quiz_id = $1`,
+            [examId]
+        );
+        const dbQuestions = dbQuestionsRes.rows;
 
-        if (Array.isArray(student_answers)) {
-            student_answers.forEach((item: any) => {
-                const qId = String(item.question_id || item.id);
-                flatAnswers[qId] = item.student_answer ?? item.answer;
-                if (item.part === 'part2') p2Answers[qId] = item.student_answer;
-                else if (item.part === 'part3') p3Answers[qId] = item.student_answer;
-                else p1Answers[qId] = item.student_answer;
-            });
-        } else if (Array.isArray(answers)) {
-            answers.forEach((item: any) => {
-                const qId = String(item.question_id || item.id);
-                flatAnswers[qId] = item.student_answer ?? item.answer;
-                if (item.part === 'part2') p2Answers[qId] = item.student_answer;
-                else if (item.part === 'part3') p3Answers[qId] = item.student_answer;
-                else p1Answers[qId] = item.student_answer;
-            });
-        } else if (student_answers && typeof student_answers === 'object') {
-            p1Answers = student_answers.part1 || {};
-            p2Answers = student_answers.part2 || {};
-            p3Answers = student_answers.part3 || {};
-            Object.entries(p1Answers).forEach(([k, v]) => { flatAnswers[k] = v; });
-            Object.entries(p2Answers).forEach(([k, v]) => { flatAnswers[k] = v; });
-            Object.entries(p3Answers).forEach(([k, v]) => { flatAnswers[k] = v; });
+        // Xây dựng lookup map từ cơ sở dữ liệu
+        const dbQuestionById = new Map<number, any>();
+        const dbToLocalMap: { [key: number]: number } = {};
+        const localToDbP1: { [key: string]: number } = {};
+        const localToDbP2: { [key: string]: number } = {};
+        const localToDbP3: { [key: string]: number } = {};
+
+        for (const row of dbQuestions) {
+            const dbId = Number(row.id);
+            dbQuestionById.set(dbId, row);
+            let localId: number | null = null;
+            try {
+                const c = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+                if (c && c.id !== undefined && !isNaN(Number(c.id))) {
+                    localId = Number(c.id);
+                }
+            } catch { localId = null; }
+
+            if (localId !== null) {
+                dbToLocalMap[dbId] = localId;
+                if (row.part_number === 1) localToDbP1[String(localId)] = dbId;
+                else if (row.part_number === 2) localToDbP2[String(localId)] = dbId;
+                else if (row.part_number === 3) localToDbP3[String(localId)] = dbId;
+            }
         }
+
+        // Tạo tập hợp câu hỏi hợp lệ của từng phần cho đề thi này
+        const validP1QuestionIds = new Set<string>();
+        const validP2QuestionIds = new Set<string>();
+        const validP3QuestionIds = new Set<string>();
+
+        (examContent.part1 || []).forEach((q: any) => { if (q.id !== undefined) validP1QuestionIds.add(String(q.id)); });
+        (examContent.part2 || []).forEach((q: any) => { if (q.id !== undefined) validP2QuestionIds.add(String(q.id)); });
+        (examContent.part3 || []).forEach((q: any) => { if (q.id !== undefined) validP3QuestionIds.add(String(q.id)); });
 
         const rawPart1Key = answerKey.part1_key || {};
         const rawPart2Key = answerKey.part2_key || {};
         const rawPart3Key = answerKey.part3_key || {};
 
-        const p1KeyEntries = Object.entries(rawPart1Key);
-        const p2KeyEntries = Object.entries(rawPart2Key);
-        const p3KeyEntries = Object.entries(rawPart3Key);
+        Object.keys(rawPart1Key).forEach(k => validP1QuestionIds.add(String(k)));
+        Object.keys(rawPart2Key).forEach(k => validP2QuestionIds.add(String(k)));
+        Object.keys(rawPart3Key).forEach(k => validP3QuestionIds.add(String(k)));
+
+        dbQuestions.forEach(row => {
+            const pNum = Number(row.part_number);
+            const dbIdStr = String(row.id);
+            const localId = dbToLocalMap[Number(row.id)];
+            if (pNum === 1) {
+                validP1QuestionIds.add(dbIdStr);
+                if (localId !== undefined) validP1QuestionIds.add(String(localId));
+            } else if (pNum === 2) {
+                validP2QuestionIds.add(dbIdStr);
+                if (localId !== undefined) validP2QuestionIds.add(String(localId));
+            } else if (pNum === 3) {
+                validP3QuestionIds.add(dbIdStr);
+                if (localId !== undefined) validP3QuestionIds.add(String(localId));
+            }
+        });
+
+        // Chuẩn hóa câu trả lời của học sinh từ payload
+        let p1Answers: { [key: string]: any } = {};
+        let p2Answers: { [key: string]: any } = {};
+        let p3Answers: { [key: string]: any } = {};
+
+        const rawItems: any[] = Array.isArray(student_answers) 
+            ? student_answers 
+            : (Array.isArray(answers) ? answers : []);
+
+        if (rawItems.length > 0) {
+            // KIỂM TRA QUESTION OWNERSHIP:
+            // Không cho phép nộp câu hỏi thuộc về exam khác (chống gian lận/sai lệch)
+            const numericQuestionIds = rawItems
+                .map(item => Number(item.question_id || item.id))
+                .filter(id => !isNaN(id) && id > 0);
+
+            if (numericQuestionIds.length > 0) {
+                const foreignCheck = await pool.query(
+                    `SELECT id, quiz_id FROM questions WHERE id = ANY($1::int[]) AND quiz_id != $2`,
+                    [numericQuestionIds, examId]
+                );
+                if (foreignCheck.rows.length > 0) {
+                    res.status(400).json({ 
+                        message: 'Phát hiện câu hỏi không thuộc đề thi này!',
+                        invalid_question_id: foreignCheck.rows[0].id
+                    });
+                    return;
+                }
+            }
+
+            for (const item of rawItems) {
+                const qIdRaw = item.question_id ?? item.id;
+                if (qIdRaw === undefined || qIdRaw === null || qIdRaw === '') continue;
+                const qIdStr = String(qIdRaw);
+                const qIdNum = Number(qIdRaw);
+                const studentAns = item.student_answer ?? item.answer;
+
+                // XÁC ĐỊNH PART THEO SERVER-SIDE TRUTH:
+                // KHÔNG mặc định câu hỏi thiếu part là part1
+                let resolvedPart: number | null = null;
+
+                // Ưu tiên 1: Tra cứu DB question ID
+                if (!isNaN(qIdNum) && dbQuestionById.has(qIdNum)) {
+                    const dbQ = dbQuestionById.get(qIdNum);
+                    resolvedPart = Number(dbQ.part_number);
+                } 
+                // Ưu tiên 2: Thuộc tính part/part_number từ payload (nếu hợp lệ)
+                else if (item.part === 'part2' || item.part === 2 || item.part_number === 2) {
+                    resolvedPart = 2;
+                } else if (item.part === 'part3' || item.part === 3 || item.part_number === 3) {
+                    resolvedPart = 3;
+                } else if (item.part === 'part1' || item.part === 1 || item.part_number === 1) {
+                    resolvedPart = 1;
+                } 
+                // Ưu tiên 3: Nếu không có part từ client, tra cứu vào tập câu hỏi Part 2 / Part 3 / Part 1 của đề thi
+                else {
+                    if (validP2QuestionIds.has(qIdStr) && !validP1QuestionIds.has(qIdStr) && !validP3QuestionIds.has(qIdStr)) {
+                        resolvedPart = 2;
+                    } else if (validP3QuestionIds.has(qIdStr) && !validP1QuestionIds.has(qIdStr) && !validP2QuestionIds.has(qIdStr)) {
+                        resolvedPart = 3;
+                    } else if (validP1QuestionIds.has(qIdStr) && !validP2QuestionIds.has(qIdStr) && !validP3QuestionIds.has(qIdStr)) {
+                        resolvedPart = 1;
+                    } else if (validP2QuestionIds.has(qIdStr)) {
+                        resolvedPart = 2;
+                    } else if (validP3QuestionIds.has(qIdStr)) {
+                        resolvedPart = 3;
+                    } else if (validP1QuestionIds.has(qIdStr)) {
+                        resolvedPart = 1;
+                    }
+                }
+
+                if (resolvedPart === 2) {
+                    p2Answers[qIdStr] = studentAns;
+                    if (!isNaN(qIdNum) && dbToLocalMap[qIdNum] !== undefined) {
+                        p2Answers[String(dbToLocalMap[qIdNum])] = studentAns;
+                    }
+                } else if (resolvedPart === 3) {
+                    p3Answers[qIdStr] = studentAns;
+                    if (!isNaN(qIdNum) && dbToLocalMap[qIdNum] !== undefined) {
+                        p3Answers[String(dbToLocalMap[qIdNum])] = studentAns;
+                    }
+                } else if (resolvedPart === 1) {
+                    p1Answers[qIdStr] = studentAns;
+                    if (!isNaN(qIdNum) && dbToLocalMap[qIdNum] !== undefined) {
+                        p1Answers[String(dbToLocalMap[qIdNum])] = studentAns;
+                    }
+                } else {
+                    // Câu hỏi không thuộc part nào -> Không ép vào part1
+                    console.warn(`[submitExam] Câu hỏi ${qIdStr} không thể xác định part, bỏ qua`);
+                }
+            }
+        } else if (student_answers && typeof student_answers === 'object') {
+            // Nested payload: { part1, part2, part3 }
+            p1Answers = { ...(student_answers.part1 || {}) };
+            p2Answers = { ...(student_answers.part2 || {}) };
+            p3Answers = { ...(student_answers.part3 || {}) };
+
+            Object.entries(p1Answers).forEach(([k, v]) => {
+                const numK = Number(k);
+                if (!isNaN(numK) && dbToLocalMap[numK] !== undefined) {
+                    p1Answers[String(dbToLocalMap[numK])] = v;
+                }
+                if (localToDbP1[k]) {
+                    p1Answers[String(localToDbP1[k])] = v;
+                }
+            });
+            Object.entries(p2Answers).forEach(([k, v]) => {
+                const numK = Number(k);
+                if (!isNaN(numK) && dbToLocalMap[numK] !== undefined) {
+                    p2Answers[String(dbToLocalMap[numK])] = v;
+                }
+                if (localToDbP2[k]) {
+                    p2Answers[String(localToDbP2[k])] = v;
+                }
+            });
+            Object.entries(p3Answers).forEach(([k, v]) => {
+                const numK = Number(k);
+                if (!isNaN(numK) && dbToLocalMap[numK] !== undefined) {
+                    p3Answers[String(dbToLocalMap[numK])] = v;
+                }
+                if (localToDbP3[k]) {
+                    p3Answers[String(localToDbP3[k])] = v;
+                }
+            });
+        }
+
+        // Xây dựng bộ key chấm điểm chuẩn xác
+        let p1KeyEntries = Object.entries(rawPart1Key);
+        let p2KeyEntries = Object.entries(rawPart2Key);
+        let p3KeyEntries = Object.entries(rawPart3Key);
+
+        if (p1KeyEntries.length === 0 && dbQuestions.some(q => q.part_number === 1)) {
+            p1KeyEntries = dbQuestions
+                .filter(q => q.part_number === 1)
+                .map(q => {
+                    let localId = q.id;
+                    try { const c = typeof q.content === 'string' ? JSON.parse(q.content) : q.content; if (c?.id) localId = c.id; } catch {}
+                    return [String(localId), typeof q.answer_data === 'string' ? q.answer_data : JSON.stringify(q.answer_data)];
+                });
+        }
+        if (p2KeyEntries.length === 0 && dbQuestions.some(q => q.part_number === 2)) {
+            p2KeyEntries = dbQuestions
+                .filter(q => q.part_number === 2)
+                .map(q => {
+                    let localId = q.id;
+                    try { const c = typeof q.content === 'string' ? JSON.parse(q.content) : q.content; if (c?.id) localId = c.id; } catch {}
+                    return [String(localId), q.answer_data];
+                });
+        }
+        if (p3KeyEntries.length === 0 && dbQuestions.some(q => q.part_number === 3)) {
+            p3KeyEntries = dbQuestions
+                .filter(q => q.part_number === 3)
+                .map(q => {
+                    let localId = q.id;
+                    try { const c = typeof q.content === 'string' ? JSON.parse(q.content) : q.content; if (c?.id) localId = c.id; } catch {}
+                    return [String(localId), typeof q.answer_data === 'string' ? q.answer_data : String(q.answer_data)];
+                });
+        }
 
         const p1Total = p1KeyEntries.length;
         const p2Total = p2KeyEntries.length;
@@ -330,7 +535,7 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
 
             for (const [qStr, correctAns] of p1KeyEntries) {
                 const qId = Number(qStr);
-                const sAns = p1Answers[qStr] ?? p1Answers[qId] ?? flatAnswers[qStr] ?? flatAnswers[qId] ?? '';
+                const sAns = p1Answers[qStr] ?? p1Answers[qId] ?? (localToDbP1[qStr] ? p1Answers[localToDbP1[qStr]] : undefined) ?? '';
                 const isCorrect = (String(sAns).trim().toUpperCase() === String(correctAns).trim().toUpperCase()) && Boolean(sAns);
                 const scoreEarned = isCorrect ? pointPerQuestion : 0;
 
@@ -355,7 +560,7 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
             // Phần 1: Trắc nghiệm 4 lựa chọn (0.25 điểm / câu)
             for (const [qStr, correctAns] of p1KeyEntries) {
                 const qId = Number(qStr);
-                const sAns = p1Answers[qStr] ?? p1Answers[qId] ?? flatAnswers[qStr] ?? flatAnswers[qId] ?? '';
+                const sAns = p1Answers[qStr] ?? p1Answers[qId] ?? (localToDbP1[qStr] ? p1Answers[localToDbP1[qStr]] : undefined) ?? '';
                 const isCorrect = (String(sAns).trim().toUpperCase() === String(correctAns).trim().toUpperCase()) && Boolean(sAns);
                 const scoreEarned = isCorrect ? 0.25 : 0;
 
@@ -378,25 +583,33 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
             // Phần 2: Trắc nghiệm Đúng / Sai 4 ý a, b, c, d
             for (const [qStr, keyObj] of p2KeyEntries) {
                 const qId = Number(qStr);
-                const sObj = p2Answers[qStr] ?? p2Answers[qId] ?? flatAnswers[qStr] ?? flatAnswers[qId] ?? {};
-                const correctObj = (keyObj || {}) as { [stmt: string]: string };
+                const sObj = p2Answers[qStr] ?? p2Answers[qId] ?? (localToDbP2[qStr] ? p2Answers[localToDbP2[qStr]] : undefined) ?? {};
+                const correctObj = (typeof keyObj === 'string' ? JSON.parse(keyObj) : keyObj) || {};
 
                 let correctCount = 0;
                 const statementResults: any[] = [];
 
-                ['a', 'b', 'c', 'd'].forEach((stmt) => {
-                    const sVal = sObj[stmt] ? String(sObj[stmt]).trim() : '';
-                    const cVal = correctObj[stmt] ? String(correctObj[stmt]).trim() : '';
-                    const stmtCorrect = Boolean(sVal && sVal === cVal);
-                    if (stmtCorrect) correctCount++;
+                if (typeof correctObj === 'object' && !Array.isArray(correctObj) && correctObj !== null) {
+                    ['a', 'b', 'c', 'd'].forEach((stmt) => {
+                        const sVal = sObj && typeof sObj === 'object' ? sObj[stmt] : undefined;
+                        const cVal = correctObj[stmt];
+                        const normS = normalizeTrueFalse(sVal);
+                        const normC = normalizeTrueFalse(cVal);
+                        const stmtCorrect = Boolean(normS && normS === normC);
+                        if (stmtCorrect) correctCount++;
 
-                    statementResults.push({
-                        statement: stmt,
-                        student: sVal || null,
-                        correct: cVal || null,
-                        is_correct: stmtCorrect
+                        statementResults.push({
+                            statement: stmt,
+                            student: normS || null,
+                            correct: normC || null,
+                            is_correct: stmtCorrect
+                        });
                     });
-                });
+                } else {
+                    const normS = normalizeTrueFalse(sObj);
+                    const normC = normalizeTrueFalse(correctObj);
+                    if (normS && normS === normC) correctCount = 4;
+                }
 
                 let qScore = 0;
                 if (correctCount === 1) qScore = 0.1;
@@ -421,16 +634,22 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
             }
 
             // Phần 3: Trắc nghiệm Trả lời ngắn
-            // Nếu Phần 1 có từ 18 câu trở lên thì mỗi câu Phần 3 là 0.25đ, ngược lại (12 câu) là 0.5đ
             const part3PointPerQuestion = p1Total >= 18 ? 0.25 : 0.5;
 
             for (const [qStr, correctAns] of p3KeyEntries) {
                 const qId = Number(qStr);
-                const rawStudentAns = p3Answers[qStr] ?? p3Answers[qId] ?? flatAnswers[qStr] ?? flatAnswers[qId] ?? '';
+                const rawStudentAns = p3Answers[qStr] ?? p3Answers[qId] ?? (localToDbP3[qStr] ? p3Answers[localToDbP3[qStr]] : undefined) ?? '';
                 const studentVal = normalizeShortAnswer(rawStudentAns);
                 const keyVal = normalizeShortAnswer(correctAns);
 
-                const isCorrect = (studentVal === keyVal && studentVal !== '' && keyVal !== '');
+                let isCorrect = (studentVal === keyVal && studentVal !== '' && keyVal !== '');
+                if (!isCorrect && studentVal !== '' && keyVal !== '') {
+                    const numStudent = Number(studentVal);
+                    const numKey = Number(keyVal);
+                    if (!isNaN(numStudent) && !isNaN(numKey) && numStudent === numKey) {
+                        isCorrect = true;
+                    }
+                }
                 const scoreEarned = isCorrect ? part3PointPerQuestion : 0;
 
                 if (isCorrect) {
@@ -536,19 +755,39 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
             // ========================================================
             // PHASE 5: TÍNH TOÁN HIỆU SUẤT THEO CHUYÊN ĐỀ (ANALYTICS)
             // ========================================================
-            const examContent = answerKey.exam_content || {};
-            const allQuestions = [
-                ...(examContent.part1 || []),
-                ...(examContent.part2 || []),
-                ...(examContent.part3 || [])
-            ];
-
-            // Gom nhóm hiệu suất theo topic trong bài làm này
+            // Gom nhóm hiệu suất theo topic trong bài làm này (xác định chuẩn theo Part và ID)
             const topicPerformance: Record<string, { attempts: number, corrects: number }> = {};
             
             for (const detail of details) {
-                const q = allQuestions.find(x => String(x.id) === String(detail.question_id));
-                const topic = q?.sub_topic || q?.topic || 'Chưa phân loại';
+                let q: any = null;
+                if (detail.part === 'part2') {
+                    q = (examContent.part2 || []).find((x: any) => String(x.id) === String(detail.question_id));
+                } else if (detail.part === 'part3') {
+                    q = (examContent.part3 || []).find((x: any) => String(x.id) === String(detail.question_id));
+                } else {
+                    q = (examContent.part1 || []).find((x: any) => String(x.id) === String(detail.question_id));
+                }
+
+                if (!q && dbQuestions.length > 0) {
+                    const matchedDb = dbQuestions.find((row: any) => {
+                        if (String(row.id) === String(detail.question_id)) return true;
+                        const pNum = detail.part === 'part2' ? 2 : detail.part === 'part3' ? 3 : 1;
+                        if (Number(row.part_number) === pNum) {
+                            try {
+                                const c = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+                                return String(c?.id) === String(detail.question_id);
+                            } catch { return false; }
+                        }
+                        return false;
+                    });
+                    if (matchedDb) {
+                        try {
+                            q = typeof matchedDb.content === 'string' ? JSON.parse(matchedDb.content) : matchedDb.content;
+                        } catch { q = null; }
+                    }
+                }
+
+                const topic = q?.sub_topic || q?.topic || q?.main_topic || 'Chưa phân loại';
 
                 if (!topicPerformance[topic]) {
                     topicPerformance[topic] = { attempts: 0, corrects: 0 };

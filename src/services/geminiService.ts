@@ -295,11 +295,73 @@ YÊU CẦU BẮT BUỘC:
 `;
 
 
-function normalizeExamData(data: any): FullExamData {
-  const shared = data.shared_context || data.sharedContexts || [];
-  data.shared_context = shared;
-  data.sharedContexts = shared;
-  return data;
+export function normalizeExamData(data: any): FullExamData {
+  if (!data || typeof data !== 'object') {
+    return { part1: [], part2: [], part3: [], shared_context: [], sharedContexts: [] };
+  }
+
+  const part1: MultipleChoiceQuestion[] = Array.isArray(data.part1) ? data.part1 : [];
+  const part2: TrueFalseQuestion[] = Array.isArray(data.part2) ? data.part2 : [];
+  const part3: ShortAnswerQuestion[] = Array.isArray(data.part3) ? data.part3 : [];
+
+  part1.forEach((q: any) => {
+    q.part = 'part1';
+    q.part_number = 1;
+    q.question_type = 'MCQ';
+  });
+
+  part2.forEach((q: any) => {
+    q.part = 'part2';
+    q.part_number = 2;
+    q.question_type = 'TRUE_FALSE';
+  });
+
+  part3.forEach((q: any) => {
+    q.part = 'part3';
+    q.part_number = 3;
+    q.question_type = 'SHORT_ANSWER';
+  });
+
+  const rawShared = data.shared_context || data.sharedContexts || [];
+  const sharedList: SharedContext[] = Array.isArray(rawShared) ? rawShared : rawShared ? [rawShared] : [];
+
+  sharedList.forEach((item: any, idx: number) => {
+    if (!item.id && !item.context_id) {
+      item.id = idx + 1;
+    }
+    const qIds: number[] = Array.isArray(item.questionIds) ? item.questionIds : (Array.isArray(item.question_ids) ? item.question_ids : []);
+    item.questionIds = qIds;
+
+    // Resolve part: do NOT default to part1 if questionIds actually belong to part2 or part3
+    if (!item.part || (item.part !== 'part1' && item.part !== 'part2' && item.part !== 'part3')) {
+      const inP2 = part2.some(q => qIds.includes(q.id));
+      const inP3 = part3.some(q => qIds.includes(q.id));
+      const inP1 = part1.some(q => qIds.includes(q.id));
+      if (inP2 && !inP1 && !inP3) item.part = 'part2';
+      else if (inP3 && !inP1 && !inP2) item.part = 'part3';
+      else item.part = 'part1';
+    }
+
+    // Attach context_id to matching questions
+    const ctxId = item.id || item.context_id;
+    if (ctxId) {
+      [part1, part2, part3].forEach(pList => {
+        pList.forEach((q: any) => {
+          if (qIds.includes(q.id)) {
+            q.context_id = ctxId;
+          }
+        });
+      });
+    }
+  });
+
+  return {
+    part1,
+    part2,
+    part3,
+    shared_context: sharedList,
+    sharedContexts: sharedList
+  };
 }
 
 // ==========================================
