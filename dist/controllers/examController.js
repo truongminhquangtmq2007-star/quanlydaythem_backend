@@ -155,7 +155,7 @@ const normalizeShortAnswer = (value) => {
 // ========================================================
 const getDraftExam = async (req, res) => {
     try {
-        const studentId = req.user?.id;
+        const studentId = req.user?.student_id || req.user?.id;
         const examId = req.params.id;
         const result = await db_1.default.query(`SELECT student_answers, last_saved_at, time_taken_seconds FROM exam_submissions 
              WHERE student_id = $1 AND document_id = $2 AND status = 'IN_PROGRESS'`, [studentId, examId]);
@@ -174,7 +174,7 @@ const getDraftExam = async (req, res) => {
 exports.getDraftExam = getDraftExam;
 const saveDraftExam = async (req, res) => {
     try {
-        const studentId = req.user?.id;
+        const studentId = req.user?.student_id || req.user?.id;
         const examId = req.params.id;
         const { answers, time_taken_seconds } = req.body;
         const exist = await db_1.default.query(`SELECT id FROM exam_submissions WHERE student_id = $1 AND document_id = $2 AND status = 'IN_PROGRESS'`, [studentId, examId]);
@@ -182,7 +182,7 @@ const saveDraftExam = async (req, res) => {
             await db_1.default.query(`UPDATE exam_submissions SET student_answers = $1, time_taken_seconds = $2, last_saved_at = NOW() WHERE id = $3`, [JSON.stringify(answers), time_taken_seconds || 0, exist.rows[0].id]);
         }
         else {
-            await db_1.default.query(`INSERT INTO exam_submissions (document_id, student_id, student_answers, time_taken_seconds, status, last_saved_at) VALUES ($1, $2, $3, $4, 'IN_PROGRESS', NOW())`, [examId, studentId, JSON.stringify(answers), time_taken_seconds || 0]);
+            await db_1.default.query(`INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, time_taken_seconds, status, last_saved_at) VALUES ($1, $2, $3, 0, $4, 'IN_PROGRESS', NOW())`, [examId, studentId, JSON.stringify(answers), time_taken_seconds || 0]);
         }
         res.status(200).json({ message: 'Đã lưu nháp' });
     }
@@ -197,7 +197,7 @@ exports.saveDraftExam = saveDraftExam;
 // ========================================================
 const submitExam = async (req, res) => {
     try {
-        const studentId = req.user?.id;
+        const studentId = req.user?.student_id || req.user?.id;
         const examId = req.params.id || req.body.document_id || req.body.exam_id;
         const { student_answers, answers, cheat_count, time_taken_seconds } = req.body;
         if (!examId) {
@@ -442,7 +442,7 @@ const submitExam = async (req, res) => {
                      WHERE id = $9 RETURNING *`, [normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details), existDraft.rows[0].id]);
             }
             else {
-                submitResult = await client.query(`INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, answers, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED') RETURNING *`, [examId, studentId, normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details)]);
+                submitResult = await client.query(`INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, answers, status, submitted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED', NOW()) RETURNING *`, [examId, studentId, normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details)]);
             }
             // ========================================================
             // PHASE 5: TÍNH TOÁN HIỆU SUẤT THEO CHUYÊN ĐỀ (ANALYTICS)
@@ -574,7 +574,7 @@ exports.getExamSubmissions = getExamSubmissions;
 // ========================================================
 const getMySubmissions = async (req, res) => {
     try {
-        const studentId = req.user?.id;
+        const studentId = req.user?.student_id || req.user?.id;
         const result = await db_1.default.query(`SELECT 
                 es.id,
                 es.document_id,
@@ -619,7 +619,8 @@ const getSubmissionDetail = async (req, res) => {
         }
         const submission = subRes.rows[0];
         // Authorization: student can only view their own submissions; teachers/admins can view any
-        if (user?.role === 'STUDENT' && Number(submission.student_id) !== Number(user.id)) {
+        const currentStudentId = user?.student_id || user?.id;
+        if (user?.role === 'STUDENT' && Number(submission.student_id) !== Number(currentStudentId)) {
             res.status(403).json({ message: 'Bạn không có quyền xem kết quả bài thi này' });
             return;
         }

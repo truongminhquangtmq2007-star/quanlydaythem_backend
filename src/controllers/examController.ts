@@ -194,7 +194,7 @@ const normalizeShortAnswer = (value: any): string => {
 // ========================================================
 export const getDraftExam = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.id;
+        const studentId = req.user?.student_id || req.user?.id;
         const examId = req.params.id;
         const result = await pool.query(
             `SELECT student_answers, last_saved_at, time_taken_seconds FROM exam_submissions 
@@ -215,7 +215,7 @@ export const getDraftExam = async (req: AuthRequest, res: Response): Promise<voi
 
 export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.id;
+        const studentId = req.user?.student_id || req.user?.id;
         const examId = req.params.id;
         const { answers, time_taken_seconds } = req.body;
         const exist = await pool.query(
@@ -230,7 +230,7 @@ export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<vo
             );
         } else {
             await pool.query(
-                `INSERT INTO exam_submissions (document_id, student_id, student_answers, time_taken_seconds, status, last_saved_at) VALUES ($1, $2, $3, $4, 'IN_PROGRESS', NOW())`,
+                `INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, time_taken_seconds, status, last_saved_at) VALUES ($1, $2, $3, 0, $4, 'IN_PROGRESS', NOW())`,
                 [examId, studentId, JSON.stringify(answers), time_taken_seconds || 0]
             );
         }
@@ -246,7 +246,7 @@ export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<vo
 // ========================================================
 export const submitExam = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.id;
+        const studentId = req.user?.student_id || req.user?.id;
         const examId = req.params.id || req.body.document_id || req.body.exam_id;
         const { student_answers, answers, cheat_count, time_taken_seconds } = req.body;
 
@@ -528,7 +528,7 @@ export const submitExam = async (req: AuthRequest, res: Response): Promise<void>
                 );
             } else {
                 submitResult = await client.query(
-                    `INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, answers, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED') RETURNING *`,
+                    `INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, cheat_count, time_taken_seconds, answers, status, submitted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED', NOW()) RETURNING *`,
                     [examId, studentId, normalizedAnswersPayload, totalScore, roundedP1Score, roundedP2Score, roundedP3Score, cheatCountNum, timeTakenNum, JSON.stringify(details)]
                 );
             }
@@ -677,7 +677,7 @@ export const getExamSubmissions = async (req: AuthRequest, res: Response): Promi
 // ========================================================
 export const getMySubmissions = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.id;
+        const studentId = req.user?.student_id || req.user?.id;
         const result = await pool.query(
             `SELECT 
                 es.id,
@@ -731,7 +731,8 @@ export const getSubmissionDetail = async (req: AuthRequest, res: Response): Prom
         const submission = subRes.rows[0];
 
         // Authorization: student can only view their own submissions; teachers/admins can view any
-        if (user?.role === 'STUDENT' && Number(submission.student_id) !== Number(user.id)) {
+        const currentStudentId = user?.student_id || user?.id;
+        if (user?.role === 'STUDENT' && Number(submission.student_id) !== Number(currentStudentId)) {
             res.status(403).json({ message: 'Bạn không có quyền xem kết quả bài thi này' });
             return;
         }
