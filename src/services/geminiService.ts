@@ -334,20 +334,47 @@ export function normalizeExamData(data: any): FullExamData {
 
     // Resolve part: do NOT default to part1 if questionIds actually belong to part2 or part3
     if (!item.part || (item.part !== 'part1' && item.part !== 'part2' && item.part !== 'part3')) {
-      const inP2 = part2.some(q => qIds.includes(q.id));
-      const inP3 = part3.some(q => qIds.includes(q.id));
-      const inP1 = part1.some(q => qIds.includes(q.id));
-      if (inP2 && !inP1 && !inP3) item.part = 'part2';
-      else if (inP3 && !inP1 && !inP2) item.part = 'part3';
-      else item.part = 'part1';
+      if (item.part_number === 2) item.part = 'part2';
+      else if (item.part_number === 3) item.part = 'part3';
+      else if (item.part_number === 1) item.part = 'part1';
+      else {
+        const subQs = Array.isArray(item.questions) ? item.questions : [];
+        const isSubP2 = subQs.some((sq: any) => sq.question_type === 'TRUE_FALSE' || sq.statements || sq.part === 'part2' || sq.part_number === 2);
+        const isSubP3 = subQs.some((sq: any) => sq.question_type === 'SHORT_ANSWER' || sq.part === 'part3' || sq.part_number === 3);
+        const isSubP1 = subQs.some((sq: any) => sq.question_type === 'MCQ' || sq.options || sq.part === 'part1' || sq.part_number === 1);
+        if (isSubP2 && !isSubP1 && !isSubP3) item.part = 'part2';
+        else if (isSubP3 && !isSubP1 && !isSubP2) item.part = 'part3';
+        else if (isSubP1 && !isSubP2 && !isSubP3) item.part = 'part1';
+        else {
+          const inP2 = part2.some(q => qIds.some(qid => String(qid) === String(q.id)));
+          const inP3 = part3.some(q => qIds.some(qid => String(qid) === String(q.id)));
+          const inP1 = part1.some(q => qIds.some(qid => String(qid) === String(q.id)));
+          if (inP2 && !inP1 && !inP3) item.part = 'part2';
+          else if (inP3 && !inP1 && !inP2) item.part = 'part3';
+          else if (inP1 && !inP2 && !inP3) item.part = 'part1';
+          else {
+            const p2HasQ = part2.some(q => qIds.some(qid => String(qid) === String(q.id)) && !q.context_id);
+            const p3HasQ = part3.some(q => qIds.some(qid => String(qid) === String(q.id)) && !q.context_id);
+            const p1HasQ = part1.some(q => qIds.some(qid => String(qid) === String(q.id)) && !q.context_id);
+            if (p2HasQ && !p1HasQ && !p3HasQ) item.part = 'part2';
+            else if (p3HasQ && !p1HasQ && !p2HasQ) item.part = 'part3';
+            else if (p1HasQ && !p2HasQ && !p3HasQ) item.part = 'part1';
+            else item.part = 'part1';
+          }
+        }
+      }
     }
 
-    // Attach context_id to matching questions
+    // Attach context_id ONLY to questions in the matching part
     const ctxId = item.id || item.context_id;
     if (ctxId) {
-      [part1, part2, part3].forEach(pList => {
+      const targetLists = item.part === 'part2' ? [part2] 
+                        : item.part === 'part3' ? [part3] 
+                        : item.part === 'part1' ? [part1] 
+                        : [part1, part2, part3];
+      targetLists.forEach(pList => {
         pList.forEach((q: any) => {
-          if (qIds.includes(q.id)) {
+          if (qIds.some(qid => String(qid) === String(q.id))) {
             q.context_id = ctxId;
           }
         });

@@ -6,7 +6,8 @@ import { AuthRequest } from '../middleware/authMiddleware';
 // 👇 Nhập hàm gọi Gemini từ service bạn vừa tạo
 import {
     parseFullExamWithGemini,
-    parseFullExamFromFileWithGemini
+    parseFullExamFromFileWithGemini,
+    normalizeExamData
 } from '../services/geminiService';
 // ========================================================
 // 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀ NỘI DUNG ĐỀ VÀO DATABASE
@@ -67,12 +68,43 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
                 // Xác định part chính xác: Không tự ý default part1 nếu questionIds thuộc part2 hoặc part3
                 let part = item.part;
                 if (!part || (part !== 'part1' && part !== 'part2' && part !== 'part3')) {
-                    const inP2 = (finalExamContent?.part2 || []).some((q: any) => questionIds.includes(q.id));
-                    const inP3 = (finalExamContent?.part3 || []).some((q: any) => questionIds.includes(q.id));
-                    const inP1 = (finalExamContent?.part1 || []).some((q: any) => questionIds.includes(q.id));
-                    if (inP2 && !inP1 && !inP3) part = 'part2';
-                    else if (inP3 && !inP1 && !inP2) part = 'part3';
-                    else part = 'part1';
+                    if (item.part_number === 2) part = 'part2';
+                    else if (item.part_number === 3) part = 'part3';
+                    else if (item.part_number === 1) part = 'part1';
+                    else {
+                        const subQs = Array.isArray(item.questions) ? item.questions : [];
+                        const isSubP2 = subQs.some((sq: any) => sq.question_type === 'TRUE_FALSE' || sq.statements || sq.part === 'part2' || sq.part_number === 2);
+                        const isSubP3 = subQs.some((sq: any) => sq.question_type === 'SHORT_ANSWER' || sq.part === 'part3' || sq.part_number === 3);
+                        const isSubP1 = subQs.some((sq: any) => sq.question_type === 'MCQ' || sq.options || sq.part === 'part1' || sq.part_number === 1);
+                        if (isSubP2 && !isSubP1 && !isSubP3) part = 'part2';
+                        else if (isSubP3 && !isSubP1 && !isSubP2) part = 'part3';
+                        else if (isSubP1 && !isSubP2 && !isSubP3) part = 'part1';
+                        else {
+                            const inP2Ctx = (finalExamContent?.part2 || []).some((q: any) => q.context_id && (q.context_id === item.id || q.context_id === item.context_id));
+                            const inP3Ctx = (finalExamContent?.part3 || []).some((q: any) => q.context_id && (q.context_id === item.id || q.context_id === item.context_id));
+                            const inP1Ctx = (finalExamContent?.part1 || []).some((q: any) => q.context_id && (q.context_id === item.id || q.context_id === item.context_id));
+                            if (inP2Ctx && !inP1Ctx && !inP3Ctx) part = 'part2';
+                            else if (inP3Ctx && !inP1Ctx && !inP2Ctx) part = 'part3';
+                            else if (inP1Ctx && !inP2Ctx && !inP3Ctx) part = 'part1';
+                            else {
+                                const inP2 = (finalExamContent?.part2 || []).some((q: any) => questionIds.some((qid: any) => String(qid) === String(q.id)));
+                                const inP3 = (finalExamContent?.part3 || []).some((q: any) => questionIds.some((qid: any) => String(qid) === String(q.id)));
+                                const inP1 = (finalExamContent?.part1 || []).some((q: any) => questionIds.some((qid: any) => String(qid) === String(q.id)));
+                                if (inP2 && !inP1 && !inP3) part = 'part2';
+                                else if (inP3 && !inP1 && !inP2) part = 'part3';
+                                else if (inP1 && !inP2 && !inP3) part = 'part1';
+                                else {
+                                    const p2HasQ = (finalExamContent?.part2 || []).some((q: any) => questionIds.some((qid: any) => String(qid) === String(q.id)) && !q.context_id);
+                                    const p3HasQ = (finalExamContent?.part3 || []).some((q: any) => questionIds.some((qid: any) => String(qid) === String(q.id)) && !q.context_id);
+                                    const p1HasQ = (finalExamContent?.part1 || []).some((q: any) => questionIds.some((qid: any) => String(qid) === String(q.id)) && !q.context_id);
+                                    if (p2HasQ && !p1HasQ && !p3HasQ) part = 'part2';
+                                    else if (p3HasQ && !p1HasQ && !p2HasQ) part = 'part3';
+                                    else if (p1HasQ && !p2HasQ && !p3HasQ) part = 'part1';
+                                    else part = 'part1';
+                                }
+                            }
+                        }
+                    }
                 }
 
                 const contextId = item.id || item.context_id || ctxCounter++;
@@ -88,9 +120,10 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
                 item.questionIds = questionIds;
 
                 if (finalExamContent) {
-                    ['part1', 'part2', 'part3'].forEach(pKey => {
+                    const targetParts = (part === 'part1' || part === 'part2' || part === 'part3') ? [part] : ['part1', 'part2', 'part3'];
+                    targetParts.forEach(pKey => {
                         (finalExamContent[pKey] || []).forEach((q: any) => {
-                            if (questionIds.includes(q.id)) {
+                            if (questionIds.some((qid: any) => String(qid) === String(q.id))) {
                                 q.context_id = contextId;
                             }
                         });
@@ -1324,10 +1357,11 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
         }
 
         if (exam_content) {
-            // 2. Lưu vào bảng exam_keys (để hiện thị lại khi vào xem)
-            const part1_key = exam_content.part1?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
-            const part2_key = exam_content.part2?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
-            const part3_key = exam_content.part3?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
+            // 2. Chuẩn hóa nội dung đề thi với normalizeExamData
+            const normalizedContent = normalizeExamData(exam_content);
+            const part1_key = normalizedContent.part1?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
+            const part2_key = normalizedContent.part2?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
+            const part3_key = normalizedContent.part3?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
             
             await client.query(
                 `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
@@ -1337,7 +1371,7 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
                     class_id = COALESCE($2, exam_keys.class_id),
                     part1_key = $3, part2_key = $4, part3_key = $5,
                     duration_minutes = $6, exam_content = $7`,
-                [actual_document_id, class_id, part1_key, part2_key, part3_key, duration_minutes || 50, exam_content]
+                [actual_document_id, class_id, part1_key, part2_key, part3_key, duration_minutes || 50, normalizedContent]
             );
 
             // 3. Xóa các câu hỏi cũ (nếu có)
@@ -1345,9 +1379,9 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
 
             // 4. Cập nhật lại bảng questions thực tế
             const allQuestions = [
-                ...(exam_content.part1 || []).map((q: any) => ({ ...q, part_number: 1, question_type: 'MCQ' })),
-                ...(exam_content.part2 || []).map((q: any) => ({ ...q, part_number: 2, question_type: 'TRUE_FALSE' })),
-                ...(exam_content.part3 || []).map((q: any) => ({ ...q, part_number: 3, question_type: 'SHORT_ANSWER' }))
+                ...(normalizedContent.part1 || []).map((q: any) => ({ ...q, part_number: 1, question_type: 'MCQ' })),
+                ...(normalizedContent.part2 || []).map((q: any) => ({ ...q, part_number: 2, question_type: 'TRUE_FALSE' })),
+                ...(normalizedContent.part3 || []).map((q: any) => ({ ...q, part_number: 3, question_type: 'SHORT_ANSWER' }))
             ];
             
             for (const q of allQuestions) {
@@ -1381,7 +1415,7 @@ const ai = new GoogleGenAI({
 export const askAITutor = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const studentId = req.user?.id;
-        const { exam_id, question_id, student_question, student_answer: clientStudentAns } = req.body;
+        const { exam_id, question_id, student_question, student_answer: clientStudentAns, part: clientPart } = req.body;
 
         if (!exam_id || !question_id || !student_question) {
             res.status(400).json({ message: 'Thiếu thông tin cần thiết (exam_id, question_id, student_question)' });
@@ -1402,7 +1436,17 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
             ...(examContent.part3 || [])
         ];
 
-        const qData = allQuestions.find((q: any) => String(q.id) === String(question_id));
+        let qData: any = null;
+        if (clientPart === 'part2') {
+            qData = (examContent.part2 || []).find((q: any) => String(q.id) === String(question_id));
+        } else if (clientPart === 'part3') {
+            qData = (examContent.part3 || []).find((q: any) => String(q.id) === String(question_id));
+        } else if (clientPart === 'part1') {
+            qData = (examContent.part1 || []).find((q: any) => String(q.id) === String(question_id));
+        }
+        if (!qData) {
+            qData = allQuestions.find((q: any) => String(q.id) === String(question_id));
+        }
 
         if (!qData) {
             res.status(404).json({ message: 'Không tìm thấy câu hỏi.' });
@@ -1411,7 +1455,9 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
 
         // 2. Tìm Shared Context (nếu có)
         const sharedList = examContent.sharedContexts || examContent.shared_context || [];
-        const sharedCtx = sharedList.find((g: any) => (g.questionIds || g.question_ids || []).includes(Number(question_id)));
+        const sharedCtx = qData.context_id 
+            ? sharedList.find((g: any) => String(g.id) === String(qData.context_id) || String(g.context_id) === String(qData.context_id))
+            : sharedList.find((g: any) => (g.questionIds || g.question_ids || []).map(Number).includes(Number(question_id)));
         const sharedContextText = sharedCtx ? `\n[NGỮ LIỆU ĐỌC HIỂU DÙNG CHO CÂU NÀY]: ${sharedCtx.content}` : '';
 
         // 3. Lấy thông tin bài làm của học sinh (nếu đã nộp)
