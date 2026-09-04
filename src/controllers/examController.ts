@@ -230,7 +230,7 @@ export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<vo
             );
         } else {
             await pool.query(
-                `INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, time_taken_seconds, status, last_saved_at) VALUES ($1, $2, $3, 0, $4, 'IN_PROGRESS', NOW())`,
+                `INSERT INTO exam_submissions (document_id, student_id, student_answers, total_score, part1_score, part2_score, part3_score, submitted_at, time_taken_seconds, status, last_saved_at) VALUES ($1, $2, $3, 0, 0, 0, 0, NULL, $4, 'IN_PROGRESS', NOW())`,
                 [examId, studentId, JSON.stringify(answers), time_taken_seconds || 0]
             );
         }
