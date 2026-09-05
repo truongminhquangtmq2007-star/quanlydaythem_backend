@@ -12,7 +12,9 @@ router.post('/explain-error', verifyToken, explainError);
 router.post('/generate-remark', verifyToken, isTeacherOrAdmin, generateRemark);
 router.post('/save-remark', verifyToken, isTeacherOrAdmin, saveRemark);
 router.get('/remark/:studentId/:month', verifyToken, isTeacherOrAdmin, getRemark);
-router.get('/insight/:studentId', verifyToken, isTeacherOrAdmin, getLatestInsight);
-router.post('/insight/generate', verifyToken, isTeacherOrAdmin, generateInsight);
+
+// Phân tích kết quả học tập cá nhân hóa: Cho phép Học sinh xem/tạo của chính mình, Giáo viên/Admin xem theo thẩm quyền
+router.get('/insight/:studentId', verifyToken, getLatestInsight);
+router.post('/insight/generate', verifyToken, generateInsight);
 
 export default router;

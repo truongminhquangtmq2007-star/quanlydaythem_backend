@@ -1,83 +1,154 @@
 import { Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { resolveCanonicalStudentId } from './examController';
 
 export const getDashboard = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.student_id;
+        const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền truy cập Student Portal' });
+            res.status(403).json({ message: 'Không có quyền truy cập Student Portal hoặc tài khoản chưa liên kết hồ sơ học sinh.' });
             return;
         }
 
-        // SCHEMA THẬT: students (id, full_name, phone_number, school_name, ...)
+        // 1. Hồ sơ học sinh
         const profileRes = await pool.query(
-            "SELECT id, full_name, email, phone_number AS phone, school_name AS school FROM students WHERE id = $1",
+            "SELECT id, full_name, email, phone_number AS phone, school_name AS school, learning_goals FROM students WHERE id = $1",
             [studentId]
         );
-        const profile = { ...profileRes.rows[0], ai_evaluation: null };
+        const profile = profileRes.rows[0] ? { ...profileRes.rows[0], ai_evaluation: null } : null;
 
-        // SCHEMA THẬT: exam_submissions dùng "submitted_at" thay vì "created_at"
+        // 2. Điểm thi (Chỉ tính các bài thi đã COMPLETED)
         let avgScore = 'Chưa có';
         let examsCount = 0;
+        let recentScores: Array<{ id: number; total_score: number; submitted_at: string; document_id?: number }> = [];
         try {
             const examsRes = await pool.query(
-                `SELECT total_score FROM exam_submissions WHERE student_id = $1 AND status = 'COMPLETED' AND submitted_at >= NOW() - INTERVAL '30 days'`,
+                `SELECT id, document_id, total_score, submitted_at 
+                 FROM exam_submissions 
+                 WHERE student_id = $1 AND status = 'COMPLETED'
+                 ORDER BY submitted_at DESC 
+                 LIMIT 10`,
                 [studentId]
             );
-            if (examsRes.rows.length > 0) {
-                avgScore = (examsRes.rows.reduce((sum, e) => sum + Number(e.total_score || 0), 0) / examsRes.rows.length).toFixed(1);
-            }
             examsCount = examsRes.rows.length;
-        } catch(e) { console.error("Lỗi lấy điểm:", e); }
+            if (examsCount > 0) {
+                const total = examsRes.rows.reduce((sum, e) => sum + Number(e.total_score || 0), 0);
+                avgScore = (total / examsCount).toFixed(1);
+                recentScores = examsRes.rows.map(e => ({
+                    id: e.id,
+                    document_id: e.document_id,
+                    total_score: Number(e.total_score),
+                    submitted_at: e.submitted_at ? new Date(e.submitted_at).toISOString() : new Date().toISOString()
+                }));
+            }
+        } catch(e) { 
+            console.error("Lỗi lấy điểm bài thi:", e); 
+        }
 
-        // SCHEMA THẬT: attendance dùng "attendance_date" thay vì "date"
+        // 3. Chuyên cần (30 ngày gần nhất)
         let attendanceRate = 100;
         try {
             const attendanceRes = await pool.query(
-                `SELECT status FROM attendance WHERE student_id = $1 AND attendance_date >= NOW() - INTERVAL '30 days'`,
+                `SELECT status FROM attendance WHERE student_id = $1 AND attendance_date >= CURRENT_DATE - INTERVAL '30 days'`,
                 [studentId]
             );
             const attendances = attendanceRes.rows;
             if (attendances.length > 0) {
-                const presentSessions = attendances.filter(a => a.status === 'PRESENT').length;
+                const presentSessions = attendances.filter(a => a.status === 'PRESENT' || a.status === 'Có mặt').length;
                 attendanceRate = Math.round((presentSessions / attendances.length) * 100);
             }
-        } catch(e) { console.error("Lỗi lấy chuyên cần:", e); }
+        } catch(e) { 
+            console.error("Lỗi lấy chuyên cần:", e); 
+        }
 
-        // Chuyên đề yếu: Lấy từ topic_performance trong exam_submissions (cột JSONB đã được ADD IF NOT EXISTS)
+        // 4. Phân tích chuyên đề (Ưu tiên bảng canonical student_topic_performance)
         let weakTopics: any[] = [];
+        let strongTopics: any[] = [];
+        let allTopics: any[] = [];
         try {
             const topicsRes = await pool.query(
-                `SELECT topic_performance FROM exam_submissions WHERE student_id = $1 AND status = 'COMPLETED' AND topic_performance IS NOT NULL LIMIT 20`,
+                `SELECT 
+                    TRIM(topic_name) as topic_name, 
+                    SUM(total_questions)::int as total_questions, 
+                    SUM(correct_answers)::int as correct_answers,
+                    ROUND(CAST(SUM(correct_answers) AS NUMERIC) * 100.0 / NULLIF(SUM(total_questions), 0), 1) as accuracy_rate
+                 FROM student_topic_performance 
+                 WHERE student_id = $1 
+                 GROUP BY TRIM(topic_name)
+                 HAVING SUM(total_questions) > 0
+                 ORDER BY accuracy_rate DESC, total_questions DESC`,
                 [studentId]
             );
-            if (topicsRes.rows.length > 0) {
-                // Tổng hợp từ tất cả bài thi
-                const aggregate: Record<string, { correct: number; total: number }> = {};
-                for (const row of topicsRes.rows) {
-                    const tp = row.topic_performance as Record<string, { correct: number; total: number }>;
-                    for (const [topic, data] of Object.entries(tp)) {
-                        if (!aggregate[topic]) aggregate[topic] = { correct: 0, total: 0 };
-                        aggregate[topic].correct += data.correct || 0;
-                        aggregate[topic].total += data.total || 0;
-                    }
-                }
-                // Tính tỷ lệ và lấy các chuyên đề yếu (< 50%)
-                weakTopics = Object.entries(aggregate)
-                    .map(([topic, { correct, total }]) => ({
-                        topic,
-                        accuracy_rate: total > 0 ? Math.round((correct / total) * 100) : 0,
-                        correct,
-                        total
-                    }))
-                    .filter(t => t.accuracy_rate < 50)
-                    .sort((a, b) => a.accuracy_rate - b.accuracy_rate)
-                    .slice(0, 3);
-            }
-        } catch(e) { console.error("Lỗi lấy chuyên đề yếu:", e); }
 
-        // Lịch học sắp tới (DISTINCT chống nhân bản dòng do enrollment thừa)
+            let rawTopics = topicsRes.rows;
+
+            // Fallback nếu student_topic_performance rỗng: đọc JSONB từ completed submissions
+            if (rawTopics.length === 0) {
+                const jsonbRes = await pool.query(
+                    `SELECT topic_performance FROM exam_submissions WHERE student_id = $1 AND status = 'COMPLETED' AND topic_performance IS NOT NULL LIMIT 20`,
+                    [studentId]
+                );
+                if (jsonbRes.rows.length > 0) {
+                    const aggregate: Record<string, { correct: number; total: number }> = {};
+                    for (const row of jsonbRes.rows) {
+                        const tp = row.topic_performance as Record<string, any>;
+                        for (const [topic, data] of Object.entries(tp || {})) {
+                            const cleanTopic = String(topic).trim();
+                            if (!aggregate[cleanTopic]) aggregate[cleanTopic] = { correct: 0, total: 0 };
+                            aggregate[cleanTopic].correct += Number(data.correct || data.corrects || 0);
+                            aggregate[cleanTopic].total += Number(data.total || data.attempts || 0);
+                        }
+                    }
+                    rawTopics = Object.entries(aggregate).map(([topic_name, stats]) => ({
+                        topic_name,
+                        total_questions: stats.total,
+                        correct_answers: stats.correct,
+                        accuracy_rate: stats.total > 0 ? Math.round((stats.correct / stats.total) * 1000) / 10 : 0
+                    }));
+                }
+            }
+
+            allTopics = rawTopics.map(t => ({
+                topic: t.topic_name,
+                total_questions: Number(t.total_questions || 0),
+                correct_answers: Number(t.correct_answers || 0),
+                accuracy_rate: Math.round(Number(t.accuracy_rate || 0))
+            }));
+
+            // Chuyên đề yếu (< 50%) và Chuyên đề mạnh (>= 80%)
+            weakTopics = allTopics
+                .filter(t => t.accuracy_rate < 50)
+                .sort((a, b) => a.accuracy_rate - b.accuracy_rate);
+
+            strongTopics = allTopics
+                .filter(t => t.accuracy_rate >= 80)
+                .sort((a, b) => b.accuracy_rate - a.accuracy_rate);
+        } catch(e) { 
+            console.error("Lỗi lấy chuyên đề:", e); 
+        }
+
+        // 5. AI Insight mới nhất nếu có
+        let aiInsight: any = null;
+        try {
+            const insightRes = await pool.query(
+                `SELECT payload, generated_at, expires_at 
+                 FROM student_ai_insights 
+                 WHERE student_id = $1 AND insight_type = 'CURRENT_PROGRESS'`,
+                [studentId]
+            );
+            if (insightRes.rows.length > 0) {
+                aiInsight = {
+                    ...insightRes.rows[0].payload,
+                    generated_at: insightRes.rows[0].generated_at,
+                    expires_at: insightRes.rows[0].expires_at
+                };
+            }
+        } catch(e) {
+            console.error("Lỗi lấy AI insight:", e);
+        }
+
+        // 6. Lịch học sắp tới
         let upcomingSessions = [];
         try {
             const scheduleRes = await pool.query(
@@ -93,9 +164,9 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
                 [studentId]
             );
             upcomingSessions = scheduleRes.rows;
-        } catch(e) { console.error(e); }
+        } catch(e) { console.error("Lỗi lấy lịch học:", e); }
 
-        // Đề thi / Bài tập / Tài liệu được giao
+        // 7. Đề thi / Bài tập / Tài liệu được giao
         let assignments = [];
         try {
             const docsRes = await pool.query(
@@ -116,8 +187,16 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
 
         res.status(200).json({
             profile,
-            stats: { avgScore, attendanceRate, examsCount },
+            stats: { 
+                avgScore, 
+                attendanceRate, 
+                examsCount,
+                recentScores
+            },
             weakTopics,
+            strongTopics,
+            allTopics,
+            aiInsight,
             upcomingSessions,
             assignments
         });
@@ -129,7 +208,7 @@ export const getDashboard = async (req: AuthRequest, res: Response): Promise<voi
 
 export const getSchedule = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.student_id;
+        const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
             res.status(403).json({ message: 'Không có quyền' });
             return;
@@ -156,7 +235,7 @@ export const getSchedule = async (req: AuthRequest, res: Response): Promise<void
 
 export const getDocuments = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.student_id;
+        const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
             res.status(403).json({ message: 'Không có quyền' });
             return;
@@ -183,7 +262,7 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
 
 export const getStudentExams = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.student_id;
+        const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
             res.status(403).json({ message: 'Không có quyền' });
             return;
@@ -214,7 +293,7 @@ export const getStudentExams = async (req: AuthRequest, res: Response): Promise<
 
 export const updateEmail = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const studentId = req.user?.student_id;
+        const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
             res.status(403).json({ message: 'Không có quyền' });
             return;

@@ -4,8 +4,8 @@ import { getStudentTopics, getClassWeakTopics } from '../controllers/analyticsCo
 
 const router = Router();
 
-// Routes phân tích
-router.get('/students/:id/topics', verifyToken, isTeacherOrAdmin, getStudentTopics);
+// Routes phân tích: Học sinh được xem chuyên đề của chính mình; Giáo viên/Admin xem theo thẩm quyền
+router.get('/students/:id/topics', verifyToken, getStudentTopics);
 router.get('/classes/:id/weak-topics', verifyToken, isTeacherOrAdmin, getClassWeakTopics);
 
 export default router;
