@@ -11,6 +11,11 @@ export interface MultipleChoiceQuestion {
   };
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   context_id?: number;
+  explanation?: string;
+  topic?: string;
+  main_topic?: string;
+  sub_topic?: string;
+  difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
 }
 
 // Phần II: Trắc nghiệm Đúng / Sai (Mỗi câu gồm 4 ý a, b, c, d)
@@ -31,6 +36,11 @@ export interface TrueFalseQuestion {
     d: 'Đ' | 'S';
   };
   context_id?: number;
+  explanation?: string;
+  topic?: string;
+  main_topic?: string;
+  sub_topic?: string;
+  difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
 }
 
 // Phần III: Trắc nghiệm Trả lời ngắn (Điền số / kết quả)
@@ -40,6 +50,12 @@ export interface ShortAnswerQuestion {
   image_url?: string;
   correctAnswer: string; // Ví dụ: "56", "-3.5", "1/2"
   context_id?: number;
+  explanation?: string;
+  solution?: string;
+  topic?: string;
+  main_topic?: string;
+  sub_topic?: string;
+  difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
 }
 
 // Ngữ cảnh chung / Câu hỏi chùm (Shared Context)
@@ -60,6 +76,27 @@ export interface FullExamData {
   part3: ShortAnswerQuestion[];
   shared_context?: SharedContext[];
   sharedContexts?: SharedContext[];
+}
+
+export interface GenerateExamPayload {
+  action?: 'generate' | 'regenerate_question';
+  subject?: string;
+  grade?: string;
+  topic?: string;
+  questionCount?: {
+    part1?: number;
+    part2?: number;
+    part3?: number;
+  };
+  difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | 'DIFFERENTIATED' | string;
+  durationMinutes?: number;
+  class_id?: number | string;
+  additionalPrompt?: string;
+  targetQuestion?: {
+    part: 'part1' | 'part2' | 'part3';
+    id: number;
+    currentQuestion?: any;
+  };
 }
 
 // Câu trả lời đơn lẻ của học sinh

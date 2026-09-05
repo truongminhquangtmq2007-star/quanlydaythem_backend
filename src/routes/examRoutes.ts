@@ -12,7 +12,8 @@ import {
     createExamFromText,
     parseExamFromFile,
     getAllExams,
-    publishExam
+    publishExam,
+    generateAIExam
 } from '../controllers/examController';
 import { uploadMemory } from '../middleware/uploadMiddleware';
 
@@ -31,11 +32,14 @@ const upload = multer({ storage: multer.memoryStorage() });
 // 1. Nhập/Sửa đáp án thủ công
 router.post('/key', verifyToken, isTeacherOrAdmin, saveAnswerKey);
 
-// 2. Tự động bóc tách đề và tạo đáp án bằng AI (Text)
+// 2. Tạo đề thi mới bằng AI theo tiêu chí & chủ đề (Generative AI)
+router.post('/generate-ai-exam', verifyToken, isTeacherOrAdmin, generateAIExam);
+
+// 3. Tự động bóc tách đề và tạo đáp án bằng AI (Text)
 router.post('/parse-ai-text', verifyToken, isTeacherOrAdmin, createExamFromText);
-// 3. Tự động bóc tách đề từ FILE (PDF/Ảnh)
+// 4. Tự động bóc tách đề từ FILE (PDF/Ảnh)
 router.post('/parse-ai-file', verifyToken, isTeacherOrAdmin, uploadMemory.single('examFile'), parseExamFromFile);
-// 4. Lấy danh sách học sinh đã nộp bài của một đề
+// 5. Lấy danh sách học sinh đã nộp bài của một đề
 router.get('/:document_id/submissions', verifyToken, isTeacherOrAdmin, getExamSubmissions);
 
 // 5. Lấy lại đáp án chuẩn đã lưu / tải đề thi làm bài

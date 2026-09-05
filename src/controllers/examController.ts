@@ -7,8 +7,11 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import {
     parseFullExamWithGemini,
     parseFullExamFromFileWithGemini,
+    generateExamWithGemini,
+    regenerateQuestionWithGemini,
     normalizeExamData
 } from '../services/geminiService';
+import { validateAndSanitizeExam } from '../validations/examValidation';
 // ========================================================
 // 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀ NỘI DUNG ĐỀ VÀO DATABASE
 // ========================================================
@@ -24,6 +27,33 @@ export const saveAnswerKey = async (req: AuthRequest, res: Response): Promise<vo
                 message: `Tài liệu có ID ${document_id} không tồn tại`
             });
             return;
+        }
+
+        const docRow = documentCheck.rows[0];
+        if (docRow.teacher_id && req.user && req.user.role === 'TEACHER' && Number(docRow.teacher_id) !== Number(req.user.id)) {
+            client.release();
+            res.status(403).json({
+                success: false,
+                message: 'Bạn không có quyền sửa đổi đề thi của giáo viên khác.',
+                error: { code: 'EXAM_FORBIDDEN', message: 'Cannot modify another teacher exam' }
+            });
+            return;
+        }
+
+        if (class_id && req.user && req.user.role === 'TEACHER') {
+            const classCheck = await client.query(
+                `SELECT id FROM classes WHERE id = $1 AND teacher_id = $2`,
+                [class_id, req.user.id]
+            );
+            if (classCheck.rows.length === 0) {
+                client.release();
+                res.status(403).json({
+                    success: false,
+                    message: 'Bạn không có quyền gán đề vào lớp học của giáo viên khác.',
+                    error: { code: 'CLASS_ACCESS_DENIED', message: 'Not teacher of this class' }
+                });
+                return;
+            }
         }
 
         await client.query('BEGIN');
@@ -296,8 +326,8 @@ export const saveDraftExam = async (req: AuthRequest, res: Response): Promise<vo
 export const submitExam = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const studentId = req.user?.student_id || req.user?.id;
-        const examId = req.params.id || req.body.document_id || req.body.exam_id;
-        const { student_answers, answers, cheat_count, time_taken_seconds } = req.body;
+        const examId = req.params?.id || req.body?.document_id || req.body?.exam_id;
+        const { student_answers, answers, cheat_count, time_taken_seconds } = req.body || {};
 
         if (!examId) {
             res.status(400).json({ message: 'Thiếu mã đề thi (document_id / exam_id)!' });
@@ -1067,9 +1097,9 @@ export const getSubmissionDetail = async (req: AuthRequest, res: Response): Prom
 // ========================================================
 export const getExamKey = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { document_id } = req.params;
+        const document_id = req.params?.document_id || req.params?.id || req.query?.document_id;
         const user = req.user;
-        const contentOnly = req.query.contentOnly === 'true';
+        const contentOnly = req.query?.contentOnly === 'true';
         
         const result = await pool.query(
             `SELECT part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content 
@@ -1121,53 +1151,239 @@ export const getExamKey = async (req: AuthRequest, res: Response): Promise<void>
 };
 
 // ========================================================
-// 6. API MỚI: TỰ ĐỘNG TẠO ĐỀ VÀ ĐÁP ÁN TỪ VĂN BẢN (GEMINI)
+// 6A. API GIÁO VIÊN: TẠO ĐỀ THI BẰNG AI THEO TIÊU CHÍ (GENERATIVE AI EXAM)
+// ========================================================
+export const generateAIExam = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        if (!req.user || (req.user.role !== 'TEACHER' && req.user.role !== 'ADMIN')) {
+            res.status(403).json({
+                success: false,
+                message: 'Chỉ giáo viên hoặc quản trị viên mới có quyền tạo đề thi bằng AI.',
+                error: { code: 'FORBIDDEN', message: 'Teacher or Admin role required' }
+            });
+            return;
+        }
+
+        const { action, class_id, targetQuestion } = req.body;
+
+        // Verify class ownership if class_id provided
+        if (class_id && req.user.role === 'TEACHER') {
+            const classCheck = await pool.query(
+                `SELECT id FROM classes WHERE id = $1 AND teacher_id = $2`,
+                [class_id, req.user.id]
+            );
+            if (classCheck.rows.length === 0) {
+                res.status(403).json({
+                    success: false,
+                    message: 'Bạn không có quyền quản lý lớp học này.',
+                    error: { code: 'CLASS_ACCESS_DENIED', message: 'Not teacher of this class' }
+                });
+                return;
+            }
+        }
+
+        // Action: regenerate_question
+        if (action === 'regenerate_question') {
+            const target = targetQuestion || (req.body.targetPart ? { part: req.body.targetPart, id: req.body.questionId, currentQuestion: req.body.currentQuestion } : null);
+            if (!target || !target.part) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Thiếu thông tin câu hỏi cần tạo lại (targetQuestion hoặc targetPart).',
+                    error: { code: 'BAD_REQUEST', message: 'Missing targetQuestion' }
+                });
+                return;
+            }
+
+            try {
+                const newQuestion = await regenerateQuestionWithGemini({
+                    ...req.body,
+                    targetQuestion: target,
+                    targetPart: target.part,
+                    questionId: target.id
+                });
+
+                let updatedExam = undefined;
+                if (req.body.currentExam && target.part) {
+                    updatedExam = {
+                        ...req.body.currentExam,
+                        [target.part]: (req.body.currentExam[target.part] || []).map((q: any) => (q.id === target.id ? newQuestion : q))
+                    };
+                }
+
+                res.status(200).json({
+                    success: true,
+                    message: 'Tạo lại câu hỏi thành công!',
+                    data: { question: newQuestion },
+                    exam: updatedExam
+                });
+                return;
+            } catch (err: any) {
+                console.error('Lỗi regenerateQuestionWithGemini:', err);
+                const status = err?.status === 429 ? 429 : (err?.status === 504 || String(err?.message).includes('timeout') ? 504 : 500);
+                res.status(status).json({
+                    success: false,
+                    message: err?.message || 'Không thể tạo lại câu hỏi bằng AI.',
+                    error: { code: 'AI_REGENERATE_FAILED', message: err?.message }
+                });
+                return;
+            }
+        }
+
+        // Action: generate (default)
+        let generatedExam: any;
+        try {
+            generatedExam = await generateExamWithGemini(req.body);
+        } catch (aiErr: any) {
+            console.error('Lỗi generateExamWithGemini:', aiErr);
+            const errStr = String(aiErr?.message || aiErr);
+            const safeAiMessage = String(aiErr?.message || '')
+                .replace(/key=[a-zA-Z0-9_\-]+/gi, 'key=***')
+                .replace(/AIza[0-9A-Za-z\-_]{35}/g, '***');
+
+            if (aiErr?.status === 429 || errStr.includes('429') || errStr.includes('RESOURCE_EXHAUSTED')) {
+                res.status(429).json({
+                    success: false,
+                    message: 'Hệ thống AI đang quá tải lượt yêu cầu. Vui lòng thử lại sau giây lát.',
+                    error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Hệ thống AI quá tải lượt yêu cầu' }
+                });
+                return;
+            }
+            if (aiErr?.status === 504 || errStr.includes('504') || errStr.includes('TIMEOUT') || errStr.includes('timeout')) {
+                res.status(504).json({
+                    success: false,
+                    message: 'Quá thời gian chờ phản hồi từ máy chủ AI. Vui lòng giảm bớt số lượng câu hoặc thử lại sau.',
+                    error: { code: 'AI_TIMEOUT', message: safeAiMessage }
+                });
+                return;
+            }
+            res.status(500).json({
+                success: false,
+                message: 'Lỗi máy chủ AI khi khởi tạo đề thi. Vui lòng thử lại.',
+                error: { code: 'AI_GENERATE_ERROR', message: safeAiMessage }
+            });
+            return;
+        }
+
+        // Validate & Sanitize generated output (PHẦN D & F)
+        const validation = validateAndSanitizeExam(generatedExam);
+        if (!validation.isValid) {
+            res.status(422).json({
+                success: false,
+                message: 'Dữ liệu đề thi AI tạo ra chưa hoàn toàn hợp lệ. Vui lòng thử tạo lại.',
+                errors: validation.errors,
+                examContent: validation.sanitizedExam || generatedExam
+            });
+            return;
+        }
+
+        const sanitized = validation.sanitizedExam;
+        const part1Key = (sanitized.part1 || []).reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+        const part2Key = (sanitized.part2 || []).reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswers || q.correctAnswer; return acc; }, {});
+        const part3Key = (sanitized.part3 || []).reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+
+        res.status(200).json({
+            success: true,
+            message: 'Khởi tạo đề thi bằng AI thành công! Vui lòng kiểm tra và chỉnh sửa trước khi xuất bản.',
+            examKey: {
+                part1_key: part1Key,
+                part2_key: part2Key,
+                part3_key: part3Key,
+                class_id: class_id || null,
+                duration_minutes: req.body.durationMinutes || 50
+            },
+            examContent: sanitized
+        });
+    } catch (error: any) {
+        console.error('Lỗi generateAIExam:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi hệ thống khi tạo đề thi bằng AI.',
+            error: { code: 'SERVER_ERROR', message: error.message }
+        });
+    }
+};
+
+// ========================================================
+// 6B. API GIÁO VIÊN: TỰ ĐỘNG BÓC TÁCH ĐỀ TỪ VĂN BẢN (TEXT)
 // ========================================================
 export const createExamFromText = async (req: AuthRequest, res: Response): Promise<void> => {
     const { rawText, class_id, document_id, durationMinutes } = req.body;
   
     try {
-      // 1. Gửi văn bản cho Gemini xử lý (Đã sửa lại gọi đúng hàm Text)
-    const fullExam = await parseFullExamWithGemini(rawText);  
-      // 2. Trích xuất đáp án đúng của từng phần
-      const part1Key = fullExam.part1.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
-      const part2Key = fullExam.part2.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
-      const part3Key = fullExam.part3.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
-  
-      // 3. KHÔNG LƯU DATABASE TỰ ĐỘNG NỮA. CHỈ TRẢ VỀ CHO FRONTEND.
-      res.status(200).json({
-        message: 'Bóc tách văn bản thành công! Vui lòng kiểm tra và chỉnh sửa trước khi lưu.',
-        examKey: {
-            part1_key: part1Key,
-            part2_key: part2Key,
-            part3_key: part3Key,
-            document_id: document_id,
-            class_id: class_id,
-            duration_minutes: durationMinutes || 50
-        },
-        examContent: fullExam, 
-      });
-    } catch (error: any) {
-        console.error('Lỗi nhận và xử lý file:', error);
-        const errMessage = String(error.message || error);
-        if (errMessage.includes('fetch failed') || errMessage.includes('TIMEOUT') || errMessage.includes('timeout')) {
-            res.status(504).json({ status: "error", message: "File quá dài hoặc AI đang quá tải, phản hồi quá lâu. Vui lòng chia nhỏ file hoặc thử lại sau." });
+        if (!req.user || (req.user.role !== 'TEACHER' && req.user.role !== 'ADMIN')) {
+            res.status(403).json({
+                success: false,
+                message: 'Chỉ giáo viên hoặc quản trị viên mới có quyền bóc tách đề thi.',
+                error: { code: 'FORBIDDEN', message: 'Teacher or Admin role required' }
+            });
             return;
         }
-        res.status(500).json({ message: 'Lỗi server khi AI xử lý file', detail: error.message });
+
+        if (!rawText || typeof rawText !== 'string' || !rawText.trim()) {
+            res.status(400).json({
+                success: false,
+                message: 'Vui lòng cung cấp nội dung văn bản đề thi (rawText).',
+                error: { code: 'BAD_REQUEST', message: 'rawText is required' }
+            });
+            return;
+        }
+
+        const fullExam = await parseFullExamWithGemini(rawText);  
+        const validation = validateAndSanitizeExam(fullExam);
+        const finalExam = validation.sanitizedExam || fullExam;
+
+        const part1Key = (finalExam.part1 || []).reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+        const part2Key = (finalExam.part2 || []).reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+        const part3Key = (finalExam.part3 || []).reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+  
+        res.status(200).json({
+            success: true,
+            message: 'Bóc tách văn bản thành công! Vui lòng kiểm tra và chỉnh sửa trước khi lưu.',
+            examKey: {
+                part1_key: part1Key,
+                part2_key: part2Key,
+                part3_key: part3Key,
+                document_id: document_id || 0,
+                class_id: class_id,
+                duration_minutes: durationMinutes || 50
+            },
+            examContent: finalExam,
+            validationErrors: validation.errors
+        });
+    } catch (error: any) {
+        console.error('Lỗi nhận và xử lý text:', error);
+        const errMessage = String(error.message || error);
+        if (error?.status === 429 || errMessage.includes('429') || errMessage.includes('RESOURCE_EXHAUSTED')) {
+            res.status(429).json({ success: false, message: 'Hệ thống AI đang quá tải. Vui lòng thử lại sau.', error: { code: 'AI_QUOTA_EXHAUSTED' } });
+            return;
+        }
+        if (errMessage.includes('fetch failed') || errMessage.includes('TIMEOUT') || errMessage.includes('timeout') || error?.status === 504) {
+            res.status(504).json({ success: false, message: 'File quá dài hoặc AI phản hồi quá lâu. Vui lòng thử lại sau.', error: { code: 'AI_TIMEOUT' } });
+            return;
+        }
+        res.status(500).json({ success: false, message: 'Lỗi server khi AI xử lý văn bản', detail: error.message });
     }
 };
 
 // ========================================================
-// 7. API MỚI: TỰ ĐỘNG TẠO ĐỀ TỪ FILE (PDF/ẢNH)
+// 7. API GIÁO VIÊN: TỰ ĐỘNG BÓC TÁCH ĐỀ TỪ FILE (PDF/ẢNH)
 // ========================================================
 export const parseExamFromFile = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
+        if (!req.user || (req.user.role !== 'TEACHER' && req.user.role !== 'ADMIN')) {
+            res.status(403).json({
+                success: false,
+                message: 'Chỉ giáo viên hoặc quản trị viên mới có quyền bóc tách đề thi.',
+                error: { code: 'FORBIDDEN', message: 'Teacher or Admin role required' }
+            });
+            return;
+        }
+
         const { document_id, class_id, durationMinutes } = req.body;
         const file = (req as any).file; 
 
         if (!file) {
-            res.status(400).json({ message: 'Không tìm thấy file tải lên!' });
+            res.status(400).json({ success: false, message: 'Không tìm thấy file tải lên!' });
             return;
         }
 
@@ -1185,106 +1401,51 @@ export const parseExamFromFile = async (req: AuthRequest, res: Response): Promis
             });
         } catch (uploadError) {
             console.error('Cloudinary upload error:', uploadError);
-            res.status(500).json({ message: 'Lỗi tải file lên máy chủ lưu trữ (Cloudinary).' });
+            res.status(500).json({ success: false, message: 'Lỗi tải file lên máy chủ lưu trữ (Cloudinary).' });
             return;
         }
 
-        if (!secure_url) {
-            res.status(500).json({ message: 'Không lấy được URL file.' });
-            return;
-        }
-
-
-        // 1. LUÔN LUÔN tạo document TRƯỚC
-        let actual_document_id = parseInt(String(document_id), 10);
-          let folderId = null;
-          if (!actual_document_id || actual_document_id === 0) {
-            // Find EXAM folder for this class_id
-            if (class_id) {
-                const folderCheck = await pool.query("SELECT id FROM folders WHERE class_id = $1 AND category = 'EXAM'", [class_id]);
-                if (folderCheck.rows.length > 0) {
-                    folderId = folderCheck.rows[0].id;
-                } else {
-                    const newFolder = await pool.query(
-                        "INSERT INTO folders (name, category, class_id) VALUES ('Đề thi', 'EXAM', $1) RETURNING id",
-                        [class_id]
-                    );
-                    folderId = newFolder.rows[0].id;
-                }
-            }
-            
-            const docRes = await pool.query(
-                `INSERT INTO documents (title, file_url, category, folder_id) VALUES ($1, $2, 'EXAM', $3) RETURNING id`,
-                [file.originalname || 'Đề thi tự động tạo', secure_url, folderId]
-            );
-            actual_document_id = docRes.rows[0].id;
-        }
-
-        console.log('--- ĐANG GỌI FILE CHO GEMINI AI XỬ LÝ ---');
-        
-        let fullExam = null;
-        let part1Key = {};
-        let part2Key = {};
-        let part3Key = {};
-
-        // 2. Gọi AI trong try-catch
+        let fullExam: any = null;
         try {
             fullExam = await parseFullExamFromFileWithGemini(file);
-            part1Key = fullExam.part1.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
-            part2Key = fullExam.part2.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
-            part3Key = fullExam.part3.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
-            console.log('--- XỬ LÝ FILE HOÀN TẤT ---');
         } catch (aiError: any) {
-            console.error('Lỗi Gemini AI timeout hoặc 429:', aiError);
-            res.status(200).json({ 
-                status: 'success',
-                message: 'Lưu đề thi thành công! (Lưu ý: AI bóc tách thất bại do quá tải, vui lòng nhập câu hỏi thủ công)',
-                data: {
-                    document_id: actual_document_id,
-                    class_id: class_id,
-                    duration_minutes: durationMinutes || 50,
-                    examKey: { part1_key: {}, part2_key: {}, part3_key: {} },
-                    examContent: { part1: [], part2: [], part3: [], shared_context: [] },
-                    questions: [],
-                    shared_context: []
-                }
+            console.error('Lỗi Gemini khi xử lý file:', aiError);
+            const errStr = String(aiError?.message || aiError);
+            const status = aiError?.status === 429 ? 429 : (aiError?.status === 504 || errStr.includes('TIMEOUT') ? 504 : 500);
+            res.status(status).json({
+                success: false,
+                message: 'AI bóc tách file thất bại. Vui lòng kiểm tra file hoặc thử lại sau.',
+                file_url: secure_url,
+                error: { code: 'AI_PARSE_FAILED', message: aiError.message }
             });
             return;
         }
 
-        // LƯU VÀO questions ĐỂ KHÔNG BỊ LỖI
-        try {
-            const allQuestions = [
-                ...(fullExam.part1 || []).map((q: any) => ({ ...q, part_number: 1, question_type: 'MULTIPLE_CHOICE' })),
-                ...(fullExam.part2 || []).map((q: any) => ({ ...q, part_number: 2, question_type: 'TRUE_FALSE' })),
-                ...(fullExam.part3 || []).map((q: any) => ({ ...q, part_number: 3, question_type: 'SHORT_ANSWER' }))
-            ];
+        const validation = validateAndSanitizeExam(fullExam);
+        const finalExam = validation.sanitizedExam || fullExam;
 
-            await Promise.all(allQuestions.map(q => 
-                pool.query(
-                    `INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) VALUES ($1, $2, $3, $4, $5)`,
-                    [actual_document_id, q.part_number, q.question_type, JSON.stringify(q), JSON.stringify(q.correctAnswer)]
-                )
-            ));
-        } catch (error: any) {
-            res.status(500).json({ message: "Lỗi lưu cơ sở dữ liệu: " + error.message });
-            return;
-        }
+        const part1Key = (finalExam.part1 || []).reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+        const part2Key = (finalExam.part2 || []).reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
+        const part3Key = (finalExam.part3 || []).reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {});
 
-        const resultData = {
-            document_id: actual_document_id,
-            class_id: class_id,
-            duration_minutes: durationMinutes || 50,
-            examKey: { part1_key: part1Key, part2_key: part2Key, part3_key: part3Key },
-            examContent: fullExam,
-            questions: fullExam,
-            shared_context: fullExam?.shared_context || []
-        };
-
-        res.status(200).json({ status: 'success', data: resultData });
+        // Clean & Production-Ready: Do NOT insert prematurely into documents and questions tables before teacher approves
+        res.status(200).json({
+            status: 'success',
+            success: true,
+            message: 'Bóc tách đề thi từ tệp thành công!',
+            data: {
+                document_id: document_id ? parseInt(String(document_id), 10) : 0,
+                class_id: class_id || null,
+                duration_minutes: durationMinutes || 50,
+                file_url: secure_url,
+                examKey: { part1_key: part1Key, part2_key: part2Key, part3_key: part3Key },
+                examContent: finalExam,
+                validationErrors: validation.errors
+            }
+        });
     } catch (error: any) {
         console.error('Lỗi nhận và xử lý file:', error);
-        res.status(500).json({ message: 'Lỗi server khi xử lý file', detail: error.message });
+        res.status(500).json({ success: false, message: 'Lỗi server khi xử lý file', detail: error.message });
     }
 };
 
@@ -1316,14 +1477,74 @@ export const getAllExams = async (req: AuthRequest, res: Response): Promise<void
 };
 
 // ========================================================
-// 9. API PHASE 3: XUẤT BẢN ĐỀ THI (PUBLISH EXAM)
+// 9. API PHASE 3: XUẤT BẢN HOẶC LƯU NHÁP ĐỀ THI (PUBLISH / SAVE DRAFT)
 // ========================================================
-
 export const publishExam = async (req: AuthRequest, res: Response): Promise<void> => {
     const client = await pool.connect();
     try {
-        let { document_id, title, grade, subject, duration_minutes, class_id, exam_content } = req.body;
+        if (!req.user || (req.user.role !== 'TEACHER' && req.user.role !== 'ADMIN')) {
+            client.release();
+            res.status(403).json({
+                success: false,
+                message: 'Chỉ giáo viên hoặc quản trị viên mới có quyền xuất bản đề thi.',
+                error: { code: 'FORBIDDEN', message: 'Teacher or Admin role required' }
+            });
+            return;
+        }
+
+        let { document_id, title, grade, subject, duration_minutes, class_id, exam_content, allow_view_answers, file_url, is_draft } = req.body;
         
+        let actual_document_id = parseInt(String(document_id || 0), 10);
+
+        // Security check: Teacher ownership of existing document
+        if (actual_document_id > 0 && req.user.role === 'TEACHER') {
+            const docCheck = await client.query(
+                `SELECT id, teacher_id FROM documents WHERE id = $1`,
+                [actual_document_id]
+            );
+            if (docCheck.rows.length > 0 && docCheck.rows[0].teacher_id !== null && Number(docCheck.rows[0].teacher_id) !== Number(req.user.id)) {
+                client.release();
+                res.status(403).json({
+                    success: false,
+                    message: 'Bạn không có quyền sửa hoặc xuất bản đề thi của giáo viên khác.',
+                    error: { code: 'EXAM_FORBIDDEN', message: 'Cannot publish another teacher exam' }
+                });
+                return;
+            }
+        }
+
+        // Security check: Class ownership
+        if (class_id && req.user.role === 'TEACHER') {
+            const classCheck = await client.query(
+                `SELECT id FROM classes WHERE id = $1 AND teacher_id = $2`,
+                [class_id, req.user.id]
+            );
+            if (classCheck.rows.length === 0) {
+                client.release();
+                res.status(403).json({
+                    success: false,
+                    message: 'Bạn không có quyền quản lý lớp học này.',
+                    error: { code: 'CLASS_ACCESS_DENIED', message: 'Not teacher of this class' }
+                });
+                return;
+            }
+        }
+
+        // Validation layer (PHẦN D)
+        if (exam_content && !is_draft) {
+            const validation = validateAndSanitizeExam(exam_content);
+            if (!validation.isValid) {
+                client.release();
+                res.status(422).json({
+                    success: false,
+                    message: 'Nội dung đề thi không đáp ứng tiêu chuẩn khảo thí. Vui lòng kiểm tra lại.',
+                    errors: validation.errors
+                });
+                return;
+            }
+            exam_content = validation.sanitizedExam;
+        }
+
         await client.query('BEGIN');
 
         let folderId: number | null = null;
@@ -1340,44 +1561,50 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
             }
         }
 
+        const safeFileUrl = file_url || 'ai-generated';
+        const safeTitle = title || 'Đề thi AI';
+        const isActive = is_draft ? false : true;
+
         // 1. Tạo hoặc cập nhật Document
-        let actual_document_id = parseInt(String(document_id), 10);
         if (!actual_document_id || actual_document_id === 0) {
             const docRes = await client.query(
-                `INSERT INTO documents (title, category, folder_id, class_id, teacher_id) 
-                 VALUES ($1, 'EXAM', $2, $3, $4) RETURNING id`,
-                [title || 'Đề thi AI', folderId, class_id || null, req.user?.id || null]
+                `INSERT INTO documents (title, file_url, category, folder_id, class_id, teacher_id, is_active) 
+                 VALUES ($1, $2, 'EXAM', $3, $4, $5, $6) RETURNING id`,
+                [safeTitle, safeFileUrl, folderId, class_id || null, req.user.id, isActive]
             );
             actual_document_id = docRes.rows[0].id;
         } else {
             await client.query(
-                `UPDATE documents SET title = $1, folder_id = $2, class_id = $3, category = 'EXAM' WHERE id = $4`,
-                [title, folderId, class_id || null, actual_document_id]
+                `UPDATE documents 
+                 SET title = $1, folder_id = $2, class_id = $3, category = 'EXAM', is_active = $4, file_url = COALESCE(NULLIF($5, ''), file_url) 
+                 WHERE id = $6`,
+                [safeTitle, folderId, class_id || null, isActive, safeFileUrl, actual_document_id]
             );
         }
 
         if (exam_content) {
-            // 2. Chuẩn hóa nội dung đề thi với normalizeExamData
             const normalizedContent = normalizeExamData(exam_content);
             const part1_key = normalizedContent.part1?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
-            const part2_key = normalizedContent.part2?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
+            const part2_key = normalizedContent.part2?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswers || q.correctAnswer; return acc; }, {}) || {};
             const part3_key = normalizedContent.part3?.reduce((acc: any, q: any) => { acc[q.id] = q.correctAnswer; return acc; }, {}) || {};
             
+            const allowView = allow_view_answers !== undefined ? Boolean(allow_view_answers) : true;
+
             await client.query(
                 `INSERT INTO exam_keys (document_id, class_id, part1_key, part2_key, part3_key, allow_view_answers, duration_minutes, exam_content) 
-                 VALUES ($1, $2, $3, $4, $5, true, $6, $7) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
                  ON CONFLICT (document_id) 
                  DO UPDATE SET 
                     class_id = COALESCE($2, exam_keys.class_id),
                     part1_key = $3, part2_key = $4, part3_key = $5,
-                    duration_minutes = $6, exam_content = $7`,
-                [actual_document_id, class_id, part1_key, part2_key, part3_key, duration_minutes || 50, normalizedContent]
+                    allow_view_answers = $6,
+                    duration_minutes = $7, exam_content = $8`,
+                [actual_document_id, class_id, part1_key, part2_key, part3_key, allowView, duration_minutes || 50, normalizedContent]
             );
 
-            // 3. Xóa các câu hỏi cũ (nếu có)
+            // Xóa các câu hỏi cũ và đồng bộ mới vào questions
             await client.query(`DELETE FROM questions WHERE quiz_id = $1`, [actual_document_id]);
 
-            // 4. Cập nhật lại bảng questions thực tế
             const allQuestions = [
                 ...(normalizedContent.part1 || []).map((q: any) => ({ ...q, part_number: 1, question_type: 'MCQ' })),
                 ...(normalizedContent.part2 || []).map((q: any) => ({ ...q, part_number: 2, question_type: 'TRUE_FALSE' })),
@@ -1385,9 +1612,13 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
             ];
             
             for (const q of allQuestions) {
+                const rawAns = q.part_number === 2 
+                    ? (q.correctAnswers || q.correctAnswer || {})
+                    : (q.correctAnswer !== undefined ? q.correctAnswer : '');
+                const answerData = JSON.stringify(rawAns);
                 await client.query(
                     `INSERT INTO questions (quiz_id, part_number, question_type, content, answer_data) VALUES ($1, $2, $3, $4, $5)`,
-                    [actual_document_id, q.part_number, q.question_type, JSON.stringify(q), JSON.stringify(q.correctAnswer)]
+                    [actual_document_id, q.part_number, q.question_type, JSON.stringify(q), answerData]
                 );
             }
         }
@@ -1395,12 +1626,18 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
         await client.query('COMMIT');
         client.release();
 
-        res.status(200).json({ success: true, message: 'Xuất bản đề thi thành công!', document_id: actual_document_id });
-    } catch (error) {
+        res.status(200).json({
+            success: true,
+            message: is_draft ? 'Lưu nháp đề thi thành công!' : 'Xuất bản đề thi thành công!',
+            document_id: actual_document_id,
+            is_draft: Boolean(is_draft),
+            is_active: isActive
+        });
+    } catch (error: any) {
         await client.query('ROLLBACK');
         client.release();
-        console.error('Lỗi publish đề:', error);
-        res.status(500).json({ message: 'Lỗi xuất bản đề thi', detail: (error as Error).message });
+        console.error('Lỗi khi xuất bản/lưu đề thi:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi lưu/xuất bản đề thi: ' + error.message });
     }
 };
 
@@ -1515,16 +1752,20 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
         }
 
         // C. REQUEST VALIDATION
-        const { exam_id, question_id, student_question, student_answer: clientStudentAns, part: clientPart, submission_id } = req.body;
+        const rawExamId = req.body?.exam_id || req.body?.document_id;
+        const student_question = req.body?.student_question || 'Giải thích giúp em câu hỏi này và hướng dẫn phương pháp giải.';
+        const { question_id, student_answer: clientStudentAns, part: clientPart, submission_id } = req.body || {};
 
-        if (!exam_id || question_id === undefined || question_id === null || !student_question || typeof student_question !== 'string' || !student_question.trim()) {
+        if (!rawExamId || question_id === undefined || question_id === null || !student_question || typeof student_question !== 'string' || !student_question.trim()) {
             res.status(400).json({
                 success: false,
-                message: 'Thiếu thông tin bắt buộc (exam_id, question_id, student_question).',
+                message: 'Thiếu thông tin bắt buộc (exam_id / document_id, question_id).',
                 error: { code: 'BAD_REQUEST', message: 'Missing required parameters' }
             });
             return;
         }
+
+        const exam_id = rawExamId;
 
         // D. EXAM EXISTENCE & ENROLLMENT ACCESS CHECK (Gate 3)
         const examRes = await pool.query(
@@ -1856,8 +2097,10 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
             res.status(200).json({
                 success: true,
                 answer: responseText, // 100% Backward compatibility
+                tutor_response: responseText,
                 data: {
                     answer: responseText,
+                    tutor_response: responseText,
                     mode: tutorMode,
                     question: {
                         id: qData.id,

@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import * as dotenv from 'dotenv';
+import { GenerateExamPayload } from '../types/exam';
 
 dotenv.config();
 
@@ -23,6 +24,11 @@ export interface MultipleChoiceQuestion {
   options: { A: string; B: string; C: string; D: string; };
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   context_id?: number;
+  explanation?: string;
+  topic?: string;
+  main_topic?: string;
+  sub_topic?: string;
+  difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
 }
 
 export interface TrueFalseQuestion {
@@ -34,6 +40,11 @@ export interface TrueFalseQuestion {
     a: 'Đ' | 'S'; b: 'Đ' | 'S'; c: 'Đ' | 'S'; d: 'Đ' | 'S';
   };
   context_id?: number;
+  explanation?: string;
+  topic?: string;
+  main_topic?: string;
+  sub_topic?: string;
+  difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
 }
 
 export interface ShortAnswerQuestion {
@@ -42,6 +53,12 @@ export interface ShortAnswerQuestion {
   image_url?: string;
   correctAnswer: string; 
   context_id?: number;
+  explanation?: string;
+  solution?: string;
+  topic?: string;
+  main_topic?: string;
+  sub_topic?: string;
+  difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
 }
 
 // MỚI: Khai báo interface cho Câu hỏi chùm (Ngữ cảnh chung / Shared Context)
@@ -83,6 +100,9 @@ const examResponseSchema = {
             required: ['A', 'B', 'C', 'D'],
           },
           correctAnswer: { type: Type.STRING },
+          explanation: { type: Type.STRING },
+          topic: { type: Type.STRING },
+          difficulty: { type: Type.STRING },
           main_topic: { type: Type.STRING },
           sub_topic: { type: Type.STRING },
         },
@@ -107,6 +127,9 @@ const examResponseSchema = {
             properties: { a: { type: Type.STRING }, b: { type: Type.STRING }, c: { type: Type.STRING }, d: { type: Type.STRING } },
             required: ['a', 'b', 'c', 'd'],
           },
+          explanation: { type: Type.STRING },
+          topic: { type: Type.STRING },
+          difficulty: { type: Type.STRING },
           main_topic: { type: Type.STRING },
           sub_topic: { type: Type.STRING },
         },
@@ -122,6 +145,10 @@ const examResponseSchema = {
           questionText: { type: Type.STRING },
           image_url: { type: Type.STRING },
           correctAnswer: { type: Type.STRING },
+          explanation: { type: Type.STRING },
+          solution: { type: Type.STRING },
+          topic: { type: Type.STRING },
+          difficulty: { type: Type.STRING },
           main_topic: { type: Type.STRING },
           sub_topic: { type: Type.STRING },
         },
@@ -479,3 +506,112 @@ export const explainErrorWithAI = async (prompt: string): Promise<string> => {
         throw error;
     }
 };
+
+// ==========================================
+// 3. HÀM TẠO ĐỀ THI MỚI TỰ ĐỘNG BẰNG AI (GENERATIVE)
+// ==========================================
+export async function generateExamWithGemini(params: GenerateExamPayload): Promise<FullExamData> {
+  const subject = params.subject || 'Toán Học';
+  const grade = params.grade || '12';
+  const topic = params.topic || 'Tổng hợp kiến thức';
+  const p1Count = params.questionCount?.part1 !== undefined ? Number(params.questionCount.part1) : 12;
+  const p2Count = params.questionCount?.part2 !== undefined ? Number(params.questionCount.part2) : 4;
+  const p3Count = params.questionCount?.part3 !== undefined ? Number(params.questionCount.part3) : 6;
+  const difficulty = params.difficulty || 'DIFFERENTIATED';
+  const duration = params.durationMinutes || 50;
+  const additional = params.additionalPrompt ? `\nYêu cầu bổ sung từ giáo viên:\n${params.additionalPrompt}` : '';
+
+  const isEnglish = subject.toLowerCase().includes('anh') || subject.toLowerCase().includes('english');
+
+  const prompt = `
+Bạn là một chuyên gia khảo thí và giáo viên hàng đầu về soạn đề thi chuẩn THPT Quốc gia theo chương trình mới của Bộ Giáo dục & Đào tạo.
+Nhiệm vụ: Tạo một đề thi hoàn chỉnh, chất lượng cao, chuẩn cấu trúc dựa trên các thông số sau:
+- Môn học: ${subject}
+- Khối lớp: Lớp ${grade}
+- Chủ đề / Trọng tâm kiến thức: ${topic}
+- Mức độ đề: ${difficulty} (Dễ: nhận biết, Trung bình: thông hiểu, Khó: vận dụng, Phân hóa: cấu trúc phân hóa chuẩn THPT)
+- Thời gian làm bài: ${duration} phút
+${additional}
+
+CẤU TRÚC PHẦN THI BẮT BUỘC:
+${isEnglish ? `
+- ĐỀ THI TIẾNG ANH: Toàn bộ câu hỏi đưa vào 'part1' (tổng cộng ${p1Count || 40} câu trắc nghiệm 4 lựa chọn A, B, C, D). Để 'part2' và 'part3' là mảng rỗng [].
+- Nếu có bài đọc hiểu (Reading Comprehension / Cloze Test), đưa đoạn văn đọc hiểu chung vào 'shared_context' (với id, content, questionIds, part: 'part1'), và các câu hỏi con tương ứng nằm trong 'part1'.
+` : `
+- Phần 1 (part1): Tạo chính xác ${p1Count} câu hỏi Trắc nghiệm nhiều lựa chọn (4 lựa chọn A, B, C, D). Đánh số id từ 1 đến ${p1Count}.
+- Phần 2 (part2): Tạo chính xác ${p2Count} câu hỏi Trắc nghiệm Đúng/Sai. Đánh số id từ 1 đến ${p2Count}. Mỗi câu BẮT BUỘC có đúng 4 mệnh đề [a, b, c, d].
+- Phần 3 (part3): Tạo chính xác ${p3Count} câu hỏi Trắc nghiệm Trả lời ngắn (kết quả là số hoặc giá trị ngắn gọn). Đánh số id từ 1 đến ${p3Count}.
+- Nếu có ngữ liệu chung (đồ thị, bảng số liệu, đoạn văn), đưa vào 'shared_context' với 'id', 'content', 'questionIds', 'part'.
+`}
+
+QUY TẮC BẮT BUỘC:
+1. ĐÁP ÁN VÀ LỜI GIẢI:
+   - BẮT BUỘC giải chi tiết và điền đáp án chuẩn xác vào 'correctAnswer':
+     + Phần 1: 'correctAnswer' CHỈ điền một trong các chữ cái 'A', 'B', 'C', hoặc 'D'.
+     + Phần 2: 'correctAnswer' là object chứa đúng 4 key: { "a": "Đ" hoặc "S", "b": "Đ" hoặc "S", "c": "Đ" hoặc "S", "d": "Đ" hoặc "S" }.
+     + Phần 3: 'correctAnswer' là chuỗi kết quả ngắn gọn (ví dụ: "12", "-4.5", "1/3").
+   - Viết lời giải / giải thích súc tích vào trường 'explanation' (hoặc 'solution' cho Phần 3).
+2. LATEX VÀ TRÌNH BÀY:
+   - Mọi công thức Toán, Lý, Hóa BẮT BUỘC bọc trong cặp dấu $ $ (ví dụ: $x^2 + 2x - 3 = 0$).
+   - KHÔNG dùng bảng LaTeX \\begin{array} hay \\begin{tabular}. Trình bày bảng bằng văn bản thuần.
+3. PHÂN LOẠI:
+   - Ghi rõ 'topic' và 'difficulty' ('EASY' | 'MEDIUM' | 'HARD') cho từng câu.
+4. ĐỊNH DẠNG:
+   - Trả về dữ liệu chuẩn JSON tuân theo schema đã cung cấp.
+`;
+
+  const text = await callGeminiWithRetry(prompt);
+  const examData: FullExamData = JSON.parse(text);
+  return normalizeExamData(examData);
+}
+
+// ==========================================
+// 4. HÀM TẠO LẠI 1 CÂU HỎI BẰNG AI (REGENERATE QUESTION)
+// ==========================================
+export async function regenerateQuestionWithGemini(params: GenerateExamPayload): Promise<any> {
+  const target = params.targetQuestion;
+  if (!target) throw new Error('Thiếu thông tin câu hỏi cần tạo lại (targetQuestion).');
+
+  const part = target.part || 'part1';
+  const subject = params.subject || 'Toán Học';
+  const grade = params.grade || '12';
+  const topic = params.topic || target.currentQuestion?.topic || 'Chung';
+  const difficulty = params.difficulty || target.currentQuestion?.difficulty || 'MEDIUM';
+
+  const prompt = `
+Bạn là chuyên gia khảo thí THPT. Hãy tạo MỘT câu hỏi MỚI hoàn toàn để thay thế câu hỏi trong đề thi:
+- Môn: ${subject}, Khối: Lớp ${grade}
+- Phần: ${part.toUpperCase()}
+- Chủ đề: ${topic}
+- Mức độ: ${difficulty}
+${part === 'part1' ? `
+- Cấu trúc Phần 1: Trắc nghiệm 4 lựa chọn (A, B, C, D). 
+- 'options' phải có đủ 4 lựa chọn A, B, C, D.
+- 'correctAnswer' chỉ là một trong ['A', 'B', 'C', 'D'].
+- Trả về câu hỏi này trong mảng 'part1' (mảng 'part2' và 'part3' để rỗng).
+` : part === 'part2' ? `
+- Cấu trúc Phần 2: Trắc nghiệm Đúng/Sai với chính xác 4 mệnh đề a, b, c, d.
+- 'statements' có đủ a, b, c, d.
+- 'correctAnswer' là { a: 'Đ'|'S', b: 'Đ'|'S', c: 'Đ'|'S', d: 'Đ'|'S' }.
+- Trả về câu hỏi này trong mảng 'part2' (mảng 'part1' và 'part3' để rỗng).
+` : `
+- Cấu trúc Phần 3: Trắc nghiệm Trả lời ngắn.
+- 'correctAnswer' là kết quả số hoặc chuỗi ngắn gọn.
+- Trả về câu hỏi này trong mảng 'part3' (mảng 'part1' và 'part2' để rỗng).
+`}
+- Kèm trường 'explanation' giải thích phương pháp giải.
+- Công thức Toán/Khoa học bọc trong $ $.
+- Trả về JSON theo đúng schema.
+`;
+
+  const text = await callGeminiWithRetry(prompt);
+  const examData: FullExamData = JSON.parse(text);
+  const normalized = normalizeExamData(examData);
+  const list = normalized[part as keyof FullExamData] as any[];
+  if (list && list.length > 0) {
+    const newQ = { ...list[0], id: target.id };
+    return newQ;
+  }
+  throw new Error('AI không tạo được câu hỏi thay thế hợp lệ.');
+}
+
