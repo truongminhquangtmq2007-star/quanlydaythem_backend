@@ -1416,27 +1416,35 @@ const ai = new GoogleGenAI({
 // 5. HELPER: RESOLVE CANONICAL STUDENT ID
 // ========================================================
 export const resolveCanonicalStudentId = async (user: any): Promise<number | null> => {
-    if (!user) return null;
+    if (!user || user.role !== 'STUDENT') return null;
 
-    // 1. If student_id is present in token, verify it exists in students table
-    if (user.student_id) {
-        const check = await pool.query('SELECT id FROM students WHERE id = $1', [user.student_id]);
-        if (check.rows.length > 0) return Number(check.rows[0].id);
+    const userId = user.id;
+    if (!userId) return null;
+
+    // 1. CANONICAL FLOW: JWT user -> users.id -> users.student_id
+    const uRes = await pool.query(
+        `SELECT id, student_id FROM users WHERE id = $1 AND role = 'STUDENT'`,
+        [userId]
+    );
+    if (uRes.rows.length === 0) return null;
+
+    const linkedStudentId = uRes.rows[0].student_id;
+    // Nếu users.student_id null hoặc không tồn tại -> reject rõ ràng, TUYỆT ĐỐI KHÔNG đoán theo user.id -> students.id
+    if (!linkedStudentId) return null;
+
+    // Nếu token có claim student_id, bắt buộc phải khớp chính xác với users.student_id trong DB
+    if (user.student_id && Number(user.student_id) !== Number(linkedStudentId)) {
+        return null;
     }
 
-    // 2. If user.id points to users table, check users.student_id
-    if (user.id) {
-        const uCheck = await pool.query('SELECT student_id FROM users WHERE id = $1 AND role = $2', [user.id, 'STUDENT']);
-        if (uCheck.rows.length > 0 && uCheck.rows[0].student_id) {
-            return Number(uCheck.rows[0].student_id);
-        }
+    // 2. CANONICAL FLOW: users.student_id -> students.id
+    const sRes = await pool.query(
+        `SELECT id FROM students WHERE id = $1`,
+        [linkedStudentId]
+    );
+    if (sRes.rows.length === 0) return null;
 
-        // 3. Check if user.id is directly an id in students table
-        const sCheck = await pool.query('SELECT id FROM students WHERE id = $1', [user.id]);
-        if (sCheck.rows.length > 0) return Number(sCheck.rows[0].id);
-    }
-
-    return null;
+    return Number(sRes.rows[0].id);
 };
 
 // ========================================================
@@ -1622,50 +1630,98 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
         let qData: any = null;
         let resolvedPart: 'part1' | 'part2' | 'part3' | null = null;
 
-        // 1. Try resolving by questions table (DB question id)
-        const dbQRes = await pool.query(
-            `SELECT id, quiz_id, part_number, question_type, content, answer_data 
-             FROM questions WHERE quiz_id = $1 AND id = $2`,
-            [exam_id, question_id]
-        );
-        if (dbQRes.rows.length > 0) {
-            const row = dbQRes.rows[0];
-            resolvedPart = row.part_number === 2 ? 'part2' : row.part_number === 3 ? 'part3' : 'part1';
-            try {
-                qData = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
-            } catch {
-                qData = row.content;
-            }
-        }
+        const hasExamContent = p1List.length > 0 || p2List.length > 0 || p3List.length > 0;
 
-        // 2. If not found by DB id, search local question id in examContent
-        if (!qData) {
-            const inP1 = p1List.find((q: any) => String(q.id) === String(question_id));
-            const inP2 = p2List.find((q: any) => String(q.id) === String(question_id));
-            const inP3 = p3List.find((q: any) => String(q.id) === String(question_id));
-
-            if (clientPart === 'part1' && inP1) {
-                qData = inP1;
-                resolvedPart = 'part1';
-            } else if (clientPart === 'part2' && inP2) {
-                qData = inP2;
-                resolvedPart = 'part2';
-            } else if (clientPart === 'part3' && inP3) {
-                qData = inP3;
-                resolvedPart = 'part3';
+        if (hasExamContent) {
+            // A. Primary Canonical Source: exam_keys.exam_content
+            if (clientPart === 'part1') {
+                const found = p1List.find((q: any) => String(q.id) === String(question_id));
+                if (found) { qData = found; resolvedPart = 'part1'; }
+            } else if (clientPart === 'part2') {
+                const found = p2List.find((q: any) => String(q.id) === String(question_id));
+                if (found) { qData = found; resolvedPart = 'part2'; }
+            } else if (clientPart === 'part3') {
+                const found = p3List.find((q: any) => String(q.id) === String(question_id));
+                if (found) { qData = found; resolvedPart = 'part3'; }
             } else if (!clientPart) {
+                // Ambiguity check across parts
+                const inP1 = p1List.find((q: any) => String(q.id) === String(question_id));
+                const inP2 = p2List.find((q: any) => String(q.id) === String(question_id));
+                const inP3 = p3List.find((q: any) => String(q.id) === String(question_id));
                 const matchCount = (inP1 ? 1 : 0) + (inP2 ? 1 : 0) + (inP3 ? 1 : 0);
-                if (matchCount === 1) {
-                    if (inP1) { qData = inP1; resolvedPart = 'part1'; }
-                    else if (inP2) { qData = inP2; resolvedPart = 'part2'; }
-                    else if (inP3) { qData = inP3; resolvedPart = 'part3'; }
-                } else if (matchCount > 1) {
+
+                if (matchCount > 1) {
                     res.status(400).json({
                         success: false,
                         message: `Câu hỏi số ${question_id} xuất hiện ở nhiều phần khác nhau trong đề thi. Vui lòng gửi kèm trường "part" ('part1', 'part2', hoặc 'part3').`,
                         error: { code: 'AMBIGUOUS_QUESTION_PART', message: 'Ambiguous question id across parts' }
                     });
                     return;
+                } else if (matchCount === 1) {
+                    if (inP1) { qData = inP1; resolvedPart = 'part1'; }
+                    else if (inP2) { qData = inP2; resolvedPart = 'part2'; }
+                    else if (inP3) { qData = inP3; resolvedPart = 'part3'; }
+                }
+            }
+
+            // If not found by local question id, check if question_id is the database sequence ID in questions table
+            if (!qData) {
+                const targetPartNum = clientPart === 'part2' ? 2 : clientPart === 'part3' ? 3 : clientPart === 'part1' ? 1 : null;
+                let dbQuery = `SELECT id, quiz_id, part_number, question_type, content, answer_data FROM questions WHERE quiz_id = $1 AND id = $2`;
+                const queryParams: any[] = [exam_id, question_id];
+                if (targetPartNum) {
+                    dbQuery += ` AND part_number = $3`;
+                    queryParams.push(targetPartNum);
+                }
+                const dbQRes = await pool.query(dbQuery, queryParams);
+                if (dbQRes.rows.length > 0) {
+                    const row = dbQRes.rows[0];
+                    resolvedPart = row.part_number === 2 ? 'part2' : row.part_number === 3 ? 'part3' : 'part1';
+                    try {
+                        qData = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+                    } catch {
+                        qData = row.content;
+                    }
+                }
+            }
+        } else {
+            // B. Secondary Canonical Source (Legacy exams without exam_content): questions table
+            const targetPartNum = clientPart === 'part2' ? 2 : clientPart === 'part3' ? 3 : clientPart === 'part1' ? 1 : null;
+            let dbQuery = `SELECT id, quiz_id, part_number, question_type, content, answer_data FROM questions WHERE quiz_id = $1`;
+            const queryParams: any[] = [exam_id];
+
+            if (targetPartNum) {
+                dbQuery += ` AND part_number = $2 AND (id = $3 OR content->>'id' = $3)`;
+                queryParams.push(targetPartNum, String(question_id));
+                const dbQRes = await pool.query(dbQuery, queryParams);
+                if (dbQRes.rows.length > 0) {
+                    const row = dbQRes.rows[0];
+                    resolvedPart = clientPart;
+                    try {
+                        qData = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+                    } catch {
+                        qData = row.content;
+                    }
+                }
+            } else {
+                dbQuery += ` AND (id = $2 OR content->>'id' = $2)`;
+                queryParams.push(String(question_id));
+                const dbQRes = await pool.query(dbQuery, queryParams);
+                if (dbQRes.rows.length > 1) {
+                    res.status(400).json({
+                        success: false,
+                        message: `Câu hỏi số ${question_id} xuất hiện ở nhiều phần khác nhau trong đề thi. Vui lòng gửi kèm trường "part" ('part1', 'part2', hoặc 'part3').`,
+                        error: { code: 'AMBIGUOUS_QUESTION_PART', message: 'Ambiguous question id across parts' }
+                    });
+                    return;
+                } else if (dbQRes.rows.length === 1) {
+                    const row = dbQRes.rows[0];
+                    resolvedPart = row.part_number === 2 ? 'part2' : row.part_number === 3 ? 'part3' : 'part1';
+                    try {
+                        qData = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+                    } catch {
+                        qData = row.content;
+                    }
                 }
             }
         }
@@ -1681,17 +1737,21 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
             return;
         }
 
-        // G. RESOLVE SHARED CONTEXT (Gate 8)
+        // G. RESOLVE SHARED CONTEXT (Gate 8 & Part Isolation)
         const sharedList = examContent.sharedContexts || examContent.shared_context || [];
         let sharedCtx: any = null;
         if (qData.context_id) {
-            sharedCtx = sharedList.find((g: any) => String(g.id) === String(qData.context_id) || String(g.context_id) === String(qData.context_id));
+            sharedCtx = sharedList.find((g: any) => {
+                const idMatch = String(g.id) === String(qData.context_id) || String(g.context_id) === String(qData.context_id);
+                const partMatches = !g.part || g.part === resolvedPart;
+                return idMatch && partMatches;
+            });
         }
         if (!sharedCtx) {
             sharedCtx = sharedList.find((g: any) => {
                 const qIds = (g.questionIds || g.question_ids || []).map(Number);
                 const partMatches = !g.part || g.part === resolvedPart;
-                return partMatches && qIds.includes(Number(question_id));
+                return partMatches && qIds.includes(Number(qData.id));
             });
         }
         const sharedContextText = sharedCtx ? `\n[NGỮ LIỆU ĐỌC HIỂU DÙNG CHO CÂU NÀY]: ${sharedCtx.content}` : '';
@@ -1704,8 +1764,8 @@ export const askAITutor = async (req: AuthRequest, res: Response): Promise<void>
         if (studentSubmission) {
             const detailedResults = studentSubmission.answers || [];
             const questionDetail = detailedResults.find((q: any) => {
-                const idMatch = String(q.question_id) === String(question_id);
-                const partMatch = !resolvedPart || !q.part || q.part === resolvedPart;
+                const idMatch = String(q.question_id) === String(qData.id) || String(q.id) === String(qData.id);
+                const partMatch = !q.part || q.part === resolvedPart;
                 return idMatch && partMatch;
             });
             if (questionDetail) {

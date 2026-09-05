@@ -25,9 +25,15 @@ setInterval(() => {
  * - Primary key: canonical student id or user id (defense-in-depth fallback to IP)
  */
 export const aiTutorRateLimiter = (req: AuthRequest, res: Response, next: NextFunction): void => {
-  const principalId = req.user?.student_id 
-    ? `student_${req.user.student_id}` 
-    : (req.user?.id ? `user_${req.user.id}` : `ip_${req.ip || 'anonymous'}`);
+  let principalId: string;
+  if (req.user?.id) {
+    principalId = `user_${req.user.id}`;
+  } else if (req.user?.student_id) {
+    principalId = `student_${req.user.student_id}`;
+  } else {
+    // If identity cannot be resolved, strictly bucket by client IP (never synthesize a fake student ID bucket)
+    principalId = `ip_${req.ip || req.socket?.remoteAddress || 'anonymous'}`;
+  }
 
   const now = Date.now();
   const windowMs = 60 * 1000;
@@ -55,3 +61,4 @@ export const aiTutorRateLimiter = (req: AuthRequest, res: Response, next: NextFu
   record.count += 1;
   next();
 };
+
