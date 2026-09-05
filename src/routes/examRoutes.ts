@@ -58,7 +58,8 @@ router.post('/submit', verifyToken, submitExam);
 router.get('/my-submissions', verifyToken, getMySubmissions);
 router.get('/submissions/:id', verifyToken, getSubmissionDetail);
 
-// Gia sư AI giải đáp thắc mắc
-router.post('/ask-tutor', verifyToken, askAITutor);
+// Gia sư AI giải đáp thắc mắc (Rate limit: 15 req/min)
+import { aiTutorRateLimiter } from '../middleware/aiTutorRateLimiter';
+router.post('/ask-tutor', verifyToken, aiTutorRateLimiter, askAITutor);
 
 export default router;
