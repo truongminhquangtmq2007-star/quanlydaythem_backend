@@ -127,6 +127,28 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
 export const getProfile360 = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+
+    // 1. Phân quyền: Học sinh không được xem profile360 tùy tiện
+    if (req.user?.role === 'STUDENT') {
+      res.status(403).json({ message: "Học sinh không có quyền truy cập hồ sơ giáo viên." });
+      return;
+    }
+
+    // Giáo viên chỉ được xem học sinh thuộc lớp họ dạy hoặc do họ quản lý
+    if (req.user?.role === 'TEACHER') {
+      const check = await pool.query(
+        `SELECT 1 FROM students s
+         LEFT JOIN enrollments e ON s.id = e.student_id
+         LEFT JOIN classes c ON e.class_id = c.id
+         WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`,
+        [id, req.user.id]
+      );
+      if (check.rows.length === 0) {
+        res.status(403).json({ message: "Không có quyền truy cập học sinh này" });
+        return;
+      }
+    }
+
     const studentRes = await pool.query('SELECT * FROM students WHERE id = $1', [id]);
     if (studentRes.rows.length === 0) {
       res.status(404).json({ message: 'Không tìm thấy học sinh' });
@@ -134,28 +156,130 @@ export const getProfile360 = async (req: AuthRequest, res: Response): Promise<vo
     }
     const student = studentRes.rows[0];
 
+    // 2. Lớp học của học sinh (hỗ trợ cả 'Đang học' và 'ACTIVE')
     const classRes = await pool.query(
-      'SELECT c.class_name, c.schedule, c.meet_link FROM enrollments e JOIN classes c ON e.class_id = c.id WHERE e.student_id = $1 AND e.status = \'ACTIVE\'',
+      `SELECT c.id, c.class_name, c.class_name as name, c.schedule, c.meet_link, COALESCE(e.status, 'Đang học') as member_status, COALESCE(c.class_type, 'Lớp dạy kèm') as subject, c.class_type
+       FROM enrollments e 
+       JOIN classes c ON e.class_id = c.id 
+       WHERE e.student_id = $1 AND (e.status IS NULL OR e.status IN ('ACTIVE', 'Đang học', 'active'))`,
       [id]
     );
 
+    // 3. Tính toán chuyên cần dạng tổng hợp canonical { total, present, late, absent, rate }
     const attendRes = await pool.query(
-      'SELECT status, count(*) FROM attendance WHERE student_id = $1 GROUP BY status',
+      'SELECT status, count(*)::int as count FROM attendance WHERE student_id = $1 GROUP BY status',
+      [id]
+    );
+    let total = 0;
+    let present = 0;
+    let late = 0;
+    let absent = 0;
+
+    for (const row of attendRes.rows) {
+      const cnt = parseInt(row.count) || 0;
+      total += cnt;
+      const st = String(row.status || '').toUpperCase();
+      if (st === 'PRESENT' || st === 'CÓ MẶT') {
+        present += cnt;
+      } else if (st === 'LATE' || st === 'MUỘN' || st === 'ĐI MUỘN') {
+        late += cnt;
+      } else if (st.includes('ABSENT') || st.includes('VẮNG') || st.includes('NGHỈ')) {
+        absent += cnt;
+      }
+    }
+    const rate = total > 0 ? Math.round((present / total) * 100) : 0;
+    const attendance = { total, present, late, absent, rate };
+
+    // 4. Lịch sử bài thi đã hoàn thành (COMPLETED)
+    const scoresRes = await pool.query(
+      `SELECT es.id, es.document_id, COALESCE(d.title, 'Bài thi') as exam_title, es.total_score, es.submitted_at, es.time_taken_seconds
+       FROM exam_submissions es
+       LEFT JOIN documents d ON es.document_id = d.id
+       WHERE es.student_id = $1 AND es.status = 'COMPLETED'
+       ORDER BY es.submitted_at DESC 
+       LIMIT 5`,
       [id]
     );
 
-    const scoresRes = await pool.query(
-      'SELECT document_id, total_score, submitted_at FROM exam_submissions WHERE student_id = $1 ORDER BY submitted_at DESC LIMIT 5',
+    // 5. Thống kê chuyên đề (Topic Mastery)
+    let topics: any[] = [];
+    const topicsRes = await pool.query(
+      `SELECT 
+         TRIM(topic_name) as topic, 
+         SUM(total_questions)::int as total_questions, 
+         SUM(correct_answers)::int as correct_answers,
+         ROUND(CAST(SUM(correct_answers) AS NUMERIC) * 100.0 / NULLIF(SUM(total_questions), 0), 1) as accuracy_rate
+       FROM student_topic_performance 
+       WHERE student_id = $1 
+       GROUP BY TRIM(topic_name)
+       HAVING SUM(total_questions) > 0
+       ORDER BY accuracy_rate DESC, total_questions DESC`,
       [id]
     );
+
+    if (topicsRes.rows.length > 0) {
+      topics = topicsRes.rows.map((t, idx) => ({
+        id: idx + 1,
+        topic: t.topic,
+        total_questions: Number(t.total_questions || 0),
+        correct_answers: Number(t.correct_answers || 0),
+        accuracy_rate: Math.round(Number(t.accuracy_rate || 0)),
+        attempt_count: Number(t.total_questions || 0),
+        correct_count: Number(t.correct_answers || 0)
+      }));
+    } else {
+      const jsonbRes = await pool.query(
+        `SELECT topic_performance FROM exam_submissions WHERE student_id = $1 AND status = 'COMPLETED' AND topic_performance IS NOT NULL LIMIT 20`,
+        [id]
+      );
+      if (jsonbRes.rows.length > 0) {
+        const aggregate: Record<string, { correct: number; total: number }> = {};
+        for (const row of jsonbRes.rows) {
+          const tp = row.topic_performance as Record<string, any>;
+          for (const [topic, data] of Object.entries(tp || {})) {
+            const cleanTopic = String(topic).trim();
+            if (!aggregate[cleanTopic]) aggregate[cleanTopic] = { correct: 0, total: 0 };
+            aggregate[cleanTopic].correct += Number(data.correct || data.corrects || 0);
+            aggregate[cleanTopic].total += Number(data.total || data.attempts || 0);
+          }
+        }
+        topics = Object.entries(aggregate).map(([topic_name, stats], idx) => ({
+          id: idx + 1,
+          topic: topic_name,
+          total_questions: stats.total,
+          correct_answers: stats.correct,
+          accuracy_rate: stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0,
+          attempt_count: stats.total,
+          correct_count: stats.correct
+        }));
+      }
+    }
+
+    // 6. Đọc kết quả đánh giá AI đã lưu (nếu có)
+    let aiEvaluation = null;
+    if (student.ai_evaluation) {
+      try {
+        aiEvaluation = typeof student.ai_evaluation === 'string' ? JSON.parse(student.ai_evaluation) : student.ai_evaluation;
+      } catch (parseErr) {
+        aiEvaluation = student.ai_evaluation;
+      }
+    }
 
     res.status(200).json({
-      student,
+      student: {
+        ...student,
+        school: student.school_name || student.school || '',
+        phone: student.phone_number || student.phone || '',
+        student_code: student.student_code || `#${student.id}`
+      },
       classes: classRes.rows,
-      attendance: attendRes.rows,
+      attendance,
       recent_scores: scoresRes.rows,
+      topics,
+      ai_evaluation: aiEvaluation
     });
   } catch (error) {
+    console.error("LỖI getProfile360:", error);
     res.status(500).json({ message: 'Lỗi server' });
   }
 };

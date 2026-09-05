@@ -65,7 +65,7 @@ export const getDriveContents = async (req: AuthRequest, res: Response): Promise
     // Truy vấn 2: Lấy File tài liệu (ĐÃ SỬA: JOIN với exam_keys để lấy cấu hình)
     // Nếu category là EXAM, ta LEFT JOIN để lấy thêm allow_view_answers và duration_minutes
     let docQuery = `
-      SELECT d.*, ek.allow_view_answers, ek.duration_minutes 
+      SELECT d.*, ek.allow_view_answers, ek.duration_minutes, ek.part1_key, ek.part2_key, ek.part3_key 
       FROM documents d 
       LEFT JOIN exam_keys ek ON d.id = ek.document_id 
       WHERE d.category = $1 AND (d.is_active IS NULL OR d.is_active = TRUE)

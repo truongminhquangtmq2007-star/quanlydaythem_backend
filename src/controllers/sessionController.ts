@@ -328,7 +328,7 @@ export const syncCalendar = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    const userResult = await pool.query('SELECT google_calendar_tokens, full_name, email FROM users WHERE id = $1', [teacherId]);
+    const userResult = await pool.query('SELECT google_calendar_tokens, full_name FROM users WHERE id = $1', [teacherId]);
     const rawTokens = userResult.rows[0]?.google_calendar_tokens;
     if (!rawTokens) {
       res.status(400).json({ message: 'Tài khoản chưa liên kết Google Calendar. Vui lòng bấm "Tích hợp Google Calendar" để cấp quyền trước.' });

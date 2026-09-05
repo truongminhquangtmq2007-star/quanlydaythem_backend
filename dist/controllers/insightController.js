@@ -6,34 +6,62 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateInsight = exports.getLatestInsight = void 0;
 const db_1 = __importDefault(require("../db"));
 const learningInsightService_1 = require("../services/learningInsightService");
+const examController_1 = require("./examController");
 const getLatestInsight = async (req, res) => {
     try {
-        if (req.user?.role === 'STUDENT') {
-            res.status(403).json({ message: 'Học sinh không có quyền truy cập báo cáo phân tích cá nhân này.' });
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ message: 'Chưa đăng nhập' });
             return;
         }
-        const studentId = req.params.studentId || req.query.studentId || req.body.studentId;
-        if (!studentId) {
-            res.status(400).json({ message: 'Thiếu studentId.' });
-            return;
-        }
-        if (req.user?.role === 'TEACHER') {
-            const check = await db_1.default.query(`SELECT 1 FROM students s
-                 LEFT JOIN enrollments e ON s.id = e.student_id
-                 LEFT JOIN classes c ON e.class_id = c.id
-                 WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [studentId, req.user.id]);
-            if (check.rows.length === 0) {
-                res.status(403).json({ message: "Không có quyền xem phân tích của học sinh này" });
+        let targetStudentId = null;
+        if (user.role === 'STUDENT') {
+            const canonicalId = await (0, examController_1.resolveCanonicalStudentId)(user);
+            if (!canonicalId) {
+                res.status(403).json({
+                    status: 'forbidden',
+                    message: 'Tài khoản học sinh không hợp lệ hoặc chưa được liên kết với hồ sơ học sinh.'
+                });
                 return;
+            }
+            const requestedId = req.params.studentId || req.query.studentId || req.body?.studentId;
+            if (requestedId && requestedId !== 'me' && Number(requestedId) !== Number(canonicalId)) {
+                res.status(403).json({
+                    status: 'forbidden',
+                    message: 'Học sinh không có quyền xem phân tích của học sinh khác.'
+                });
+                return;
+            }
+            targetStudentId = canonicalId;
+        }
+        else {
+            const rawId = req.params.studentId || req.query.studentId || req.body?.studentId;
+            if (!rawId || rawId === 'me') {
+                res.status(400).json({ message: 'Thiếu studentId.' });
+                return;
+            }
+            targetStudentId = Number(rawId);
+            if (user.role === 'TEACHER') {
+                const check = await db_1.default.query(`SELECT 1 FROM students s
+                     LEFT JOIN enrollments e ON s.id = e.student_id
+                     LEFT JOIN classes c ON e.class_id = c.id
+                     WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [targetStudentId, user.id]);
+                if (check.rows.length === 0) {
+                    res.status(403).json({ message: "Không có quyền xem phân tích của học sinh này" });
+                    return;
+                }
             }
         }
         const result = await db_1.default.query(`
             SELECT payload, generated_at, expires_at 
             FROM student_ai_insights 
             WHERE student_id = $1 AND insight_type = 'CURRENT_PROGRESS'
-        `, [studentId]);
+        `, [targetStudentId]);
         if (result.rows.length === 0) {
-            res.status(404).json({ message: 'Chưa có phân tích.' });
+            res.status(404).json({
+                status: 'not_found',
+                message: 'Chưa có phân tích cho học sinh này.'
+            });
             return;
         }
         res.status(200).json({
@@ -53,27 +81,51 @@ const getLatestInsight = async (req, res) => {
 exports.getLatestInsight = getLatestInsight;
 const generateInsight = async (req, res) => {
     try {
-        if (req.user?.role === 'STUDENT') {
-            res.status(403).json({ message: 'Học sinh không có quyền kích hoạt phân tích cá nhân.' });
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ message: 'Chưa đăng nhập' });
             return;
         }
-        const studentId = req.params.studentId || req.body.studentId || req.query.studentId;
-        if (!studentId) {
-            res.status(400).json({ message: 'Thiếu studentId.' });
-            return;
-        }
-        if (req.user?.role === 'TEACHER') {
-            const check = await db_1.default.query(`SELECT 1 FROM students s
-                 LEFT JOIN enrollments e ON s.id = e.student_id
-                 LEFT JOIN classes c ON e.class_id = c.id
-                 WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [studentId, req.user.id]);
-            if (check.rows.length === 0) {
-                res.status(403).json({ message: "Không có quyền phân tích học sinh này" });
+        let targetStudentId = null;
+        if (user.role === 'STUDENT') {
+            const canonicalId = await (0, examController_1.resolveCanonicalStudentId)(user);
+            if (!canonicalId) {
+                res.status(403).json({
+                    status: 'forbidden',
+                    message: 'Tài khoản học sinh không hợp lệ hoặc chưa được liên kết với hồ sơ học sinh.'
+                });
                 return;
+            }
+            const requestedId = req.params.studentId || req.body?.studentId || req.query?.studentId;
+            if (requestedId && requestedId !== 'me' && Number(requestedId) !== Number(canonicalId)) {
+                res.status(403).json({
+                    status: 'forbidden',
+                    message: 'Học sinh không có quyền yêu cầu phân tích cho học sinh khác.'
+                });
+                return;
+            }
+            targetStudentId = canonicalId;
+        }
+        else {
+            const rawId = req.params.studentId || req.body?.studentId || req.query?.studentId;
+            if (!rawId || rawId === 'me') {
+                res.status(400).json({ message: 'Thiếu studentId.' });
+                return;
+            }
+            targetStudentId = Number(rawId);
+            if (user.role === 'TEACHER') {
+                const check = await db_1.default.query(`SELECT 1 FROM students s
+                     LEFT JOIN enrollments e ON s.id = e.student_id
+                     LEFT JOIN classes c ON e.class_id = c.id
+                     WHERE s.id = $1 AND (s.teacher_id = $2 OR c.teacher_id = $2)`, [targetStudentId, user.id]);
+                if (check.rows.length === 0) {
+                    res.status(403).json({ message: "Không có quyền phân tích học sinh này" });
+                    return;
+                }
             }
         }
         // 1. Build Data Snapshot
-        const snapshot = await (0, learningInsightService_1.buildLearningSnapshot)(studentId);
+        const snapshot = await (0, learningInsightService_1.buildLearningSnapshot)(targetStudentId);
         if (snapshot.dataQuality === 'INSUFFICIENT') {
             res.status(422).json({
                 status: 'insufficient_data',
@@ -81,13 +133,13 @@ const generateInsight = async (req, res) => {
             });
             return;
         }
-        // 2. Generate Insight with AI
+        // 2. Generate Insight with AI (or deterministic fallback)
         const aiResponse = await (0, learningInsightService_1.generateStudentPersonalizedInsight)(snapshot);
         // 3. Persist to DB (Upsert)
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days expiration
         await db_1.default.query(`
             INSERT INTO student_ai_insights (student_id, insight_type, payload, prompt_version, model, expires_at)
-            VALUES ($1, 'CURRENT_PROGRESS', $2, 'PERSONALIZATION_PROMPT_V1', 'gemini-2.5-flash', $3)
+            VALUES ($1, 'CURRENT_PROGRESS', $2, 'PERSONALIZATION_PROMPT_V1', 'gemini-3.7-flash', $3)
             ON CONFLICT (student_id, insight_type) 
             DO UPDATE SET 
                 payload = EXCLUDED.payload, 
@@ -95,7 +147,7 @@ const generateInsight = async (req, res) => {
                 expires_at = EXCLUDED.expires_at,
                 prompt_version = EXCLUDED.prompt_version,
                 model = EXCLUDED.model
-        `, [studentId, JSON.stringify(aiResponse), expiresAt]);
+        `, [targetStudentId, JSON.stringify(aiResponse), expiresAt]);
         // 4. Return
         res.status(200).json({
             status: 'success',
@@ -108,11 +160,14 @@ const generateInsight = async (req, res) => {
     }
     catch (error) {
         console.error("Lỗi generateInsight:", error);
-        if (error.message === 'INSUFFICIENT_DATA') {
+        if (error.message === 'STUDENT_NOT_FOUND') {
+            res.status(404).json({ status: 'not_found', message: 'Không tìm thấy học sinh.' });
+        }
+        else if (error.message === 'INSUFFICIENT_DATA') {
             res.status(422).json({ status: 'insufficient_data', message: 'Không đủ dữ liệu.' });
         }
         else {
-            res.status(500).json({ status: 'error', message: 'Lỗi khi gọi AI Service. Vui lòng thử lại sau.' });
+            res.status(500).json({ status: 'error', message: 'Lỗi khi phân tích kết quả học tập.' });
         }
     }
 };

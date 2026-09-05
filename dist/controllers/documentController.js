@@ -204,7 +204,7 @@ const deleteDocument = async (req, res) => {
             // Hard-delete if no submissions exist
             await db_1.default.query('DELETE FROM assignments WHERE document_id = $1', [id]);
             await db_1.default.query('DELETE FROM exam_keys WHERE document_id = $1', [id]);
-            await db_1.default.query('DELETE FROM question_contexts WHERE document_id = $1', [id]);
+            await db_1.default.query('DELETE FROM questions WHERE quiz_id = $1', [id]);
             await db_1.default.query('DELETE FROM documents WHERE id = $1', [id]);
         }
         res.status(200).json({ message: 'Đã xóa tài liệu/đề thi thành công' });

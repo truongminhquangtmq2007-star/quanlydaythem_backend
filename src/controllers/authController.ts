@@ -88,32 +88,82 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
   const identifier = req.body.identifier || req.body.username;
   const password = req.body.password;
   try {
-    const query = `
-      SELECT u.id, u.username, u.password_hash, u.full_name, u.student_id, u.title 
+    // 1. CANONICAL FLOW: Tìm tài khoản users liên kết với students
+    const canonicalQuery = `
+      SELECT u.id, u.username, u.password_hash, u.full_name, u.student_id, u.title, s.password as student_password 
         FROM users u
-        LEFT JOIN students s ON u.student_id = s.id
-        WHERE (u.username = $1 OR s.phone_number = $1) AND u.role = 'STUDENT'
-        UNION
-        SELECT s.id, s.username, s.password as password_hash, s.full_name, s.id as student_id, 'Học sinh' as title
-        FROM students s
-        WHERE (s.username = $1 OR s.phone_number = $1) AND s.password IS NOT NULL
+        JOIN students s ON u.student_id = s.id
+        WHERE (u.username = $1 OR s.phone_number = $1 OR s.username = $1) AND u.role = 'STUDENT'
     `;
-    const result = await pool.query(query, [identifier]);
-    const user = result.rows[0];
+    const canonicalResult = await pool.query(canonicalQuery, [identifier]);
+    let user = canonicalResult.rows[0];
+
+    // 2. Nếu không tìm thấy qua canonical JOIN, kiểm tra users chưa liên kết (student_id IS NULL)
+    if (!user) {
+      const unlinkedUserRes = await pool.query(
+        "SELECT id, username, password_hash, full_name, student_id, title FROM users WHERE username = $1 AND role = 'STUDENT'",
+        [identifier]
+      );
+      if (unlinkedUserRes.rows.length > 0) {
+        user = unlinkedUserRes.rows[0];
+      }
+    }
+
+    // 3. Fallback: Kiểm tra tài khoản legacy trong bảng students
+    let isLegacyOnly = false;
+    if (!user) {
+      const legacyStudentRes = await pool.query(
+        "SELECT id as student_id, username, password as password_hash, full_name, phone_number FROM students WHERE (username = $1 OR phone_number = $1) AND password IS NOT NULL",
+        [identifier]
+      );
+      if (legacyStudentRes.rows.length > 0) {
+        const legacyStudent = legacyStudentRes.rows[0];
+        // Kiểm tra xem đã có users nào liên kết với học sinh này chưa
+        const linkedUserRes = await pool.query(
+          "SELECT id, username, password_hash, full_name, student_id, title FROM users WHERE student_id = $1 AND role = 'STUDENT'",
+          [legacyStudent.student_id]
+        );
+        if (linkedUserRes.rows.length > 0) {
+          user = { ...linkedUserRes.rows[0], student_password: legacyStudent.password_hash };
+        } else {
+          // Tài khoản legacy chưa có bản ghi users: giữ nguyên identity rõ ràng, không gán bừa users.id
+          user = {
+            id: legacyStudent.student_id,
+            username: legacyStudent.username,
+            password_hash: legacyStudent.password_hash,
+            full_name: legacyStudent.full_name,
+            student_id: null, // Chưa liên kết users canonical -> sẽ nhận 403 khi vào dashboard
+            title: 'Học sinh'
+          };
+          isLegacyOnly = true;
+        }
+      }
+    }
+
     if (!user) {
       res.status(400).json({ message: 'Tài khoản không tồn tại!' });
       return;
     }
-    const isMatch = await bcrypt.compare(password, user.password_hash);
+
+    let isMatch = false;
+    if (user.password_hash) {
+      isMatch = await bcrypt.compare(password, user.password_hash);
+    }
+    if (!isMatch && user.student_password) {
+      isMatch = await bcrypt.compare(password, user.student_password);
+    }
+
     if (!isMatch) {
       res.status(400).json({ message: 'Sai mật khẩu!' });
       return;
     }
+
     const token = jwt.sign(
       { id: user.id, role: 'STUDENT', full_name: user.full_name, student_id: user.student_id },
       process.env.JWT_SECRET as string,
       { expiresIn: '1d' }
     );
+
     res.json({
       message: 'Đăng nhập thành công',
       token,
@@ -122,7 +172,7 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
         full_name: user.full_name,
         role: 'STUDENT',
         student_id: user.student_id,
-        title: user.title
+        title: user.title || 'Học sinh'
       }
     });
   } catch (error) {

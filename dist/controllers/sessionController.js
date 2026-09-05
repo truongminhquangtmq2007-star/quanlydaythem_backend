@@ -295,7 +295,7 @@ const syncCalendar = async (req, res) => {
             res.status(400).json({ message: 'Buổi học đang ở trạng thái Nháp. Vui lòng bấm "Công bố buổi học" trước khi đồng bộ Google Calendar.' });
             return;
         }
-        const userResult = await db_1.default.query('SELECT google_calendar_tokens, full_name, email FROM users WHERE id = $1', [teacherId]);
+        const userResult = await db_1.default.query('SELECT google_calendar_tokens, full_name FROM users WHERE id = $1', [teacherId]);
         const rawTokens = userResult.rows[0]?.google_calendar_tokens;
         if (!rawTokens) {
             res.status(400).json({ message: 'Tài khoản chưa liên kết Google Calendar. Vui lòng bấm "Tích hợp Google Calendar" để cấp quyền trước.' });

@@ -51,8 +51,8 @@ const getWeeklyReport = async (req, res) => {
         const totalSessions = attendances.length;
         const presentSessions = attendances.filter(a => a.status === 'PRESENT').length;
         const attendanceRate = totalSessions > 0 ? Math.round((presentSessions / totalSessions) * 100) : 100;
-        // 4. Phân tích chuyên đề (chuẩn schema: topic)
-        const topicsRes = await db_1.default.query(`SELECT topic, accuracy_rate 
+        // 4. Phân tích chuyên đề (chuẩn schema: topic_name)
+        const topicsRes = await db_1.default.query(`SELECT topic_name AS topic, accuracy_rate 
              FROM student_topic_performance 
              WHERE student_id = $1 
              ORDER BY accuracy_rate DESC`, [id]);

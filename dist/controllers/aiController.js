@@ -13,14 +13,14 @@ const explainError = async (req, res) => {
             res.status(400).json({ message: 'Thiếu thông tin question_id hoặc student_answer' });
             return;
         }
-        let targetStudentId = req.user?.student_id;
+        let targetStudentId = req.user?.student_id || req.user?.id;
         if (req.user?.role === 'STUDENT') {
             // Student can only query for themselves
-            if (student_id && Number(student_id) !== Number(req.user?.student_id)) {
+            if (student_id && Number(student_id) !== Number(req.user?.student_id || req.user?.id)) {
                 res.status(403).json({ message: 'Không có quyền truy cập dữ liệu của học sinh khác.' });
                 return;
             }
-            targetStudentId = req.user?.student_id;
+            targetStudentId = req.user?.student_id || req.user?.id;
         }
         else if (student_id) {
             targetStudentId = student_id;
@@ -116,12 +116,12 @@ const generateRemark = async (req, res) => {
         const avgScore = examRes.rows[0]?.avg_score ? parseFloat(examRes.rows[0].avg_score).toFixed(2) : null;
         const totalExams = parseInt(examRes.rows[0]?.total_exams || '0', 10);
         // Lấy dữ liệu topic
-        const topicRes = await db_1.default.query(`SELECT topic, accuracy_rate FROM student_topic_performance WHERE student_id = $1 ORDER BY accuracy_rate DESC`, [student_id]);
+        const topicRes = await db_1.default.query(`SELECT topic_name, accuracy_rate FROM student_topic_performance WHERE student_id = $1 ORDER BY accuracy_rate DESC`, [student_id]);
         let strongTopics = [];
         let weakTopics = [];
         if (topicRes.rows.length > 0) {
-            strongTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) >= 80).map(t => t.topic);
-            weakTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) < 50).map(t => t.topic);
+            strongTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) >= 80).map(t => t.topic_name);
+            weakTopics = topicRes.rows.filter(t => Number(t.accuracy_rate) < 50).map(t => t.topic_name);
         }
         const dataSummary = {
             attendance: { present, absent, late },

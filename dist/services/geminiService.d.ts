@@ -1,3 +1,4 @@
+import { GenerateExamPayload } from '../types/exam';
 export interface MultipleChoiceQuestion {
     id: number;
     questionText: string;
@@ -10,6 +11,11 @@ export interface MultipleChoiceQuestion {
     };
     correctAnswer: 'A' | 'B' | 'C' | 'D';
     context_id?: number;
+    explanation?: string;
+    topic?: string;
+    main_topic?: string;
+    sub_topic?: string;
+    difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
 }
 export interface TrueFalseQuestion {
     id: number;
@@ -28,6 +34,11 @@ export interface TrueFalseQuestion {
         d: 'Đ' | 'S';
     };
     context_id?: number;
+    explanation?: string;
+    topic?: string;
+    main_topic?: string;
+    sub_topic?: string;
+    difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
 }
 export interface ShortAnswerQuestion {
     id: number;
@@ -35,6 +46,12 @@ export interface ShortAnswerQuestion {
     image_url?: string;
     correctAnswer: string;
     context_id?: number;
+    explanation?: string;
+    solution?: string;
+    topic?: string;
+    main_topic?: string;
+    sub_topic?: string;
+    difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
 }
 export interface SharedContext {
     id: number;
@@ -52,6 +69,7 @@ export interface FullExamData {
     shared_context?: SharedContext[];
     sharedContexts?: SharedContext[];
 }
+export declare function normalizeExamData(data: any): FullExamData;
 export declare function parseFullExamWithGemini(rawText: string): Promise<FullExamData>;
 export declare const parseFullExamFromFileWithGemini: (file: Express.Multer.File) => Promise<FullExamData>;
 export declare function generateWithFallback(prompt: string): Promise<string>;
@@ -61,4 +79,6 @@ export declare function generateWithFallback(prompt: string): Promise<string>;
  * Hiện tại mặc định sử dụng Google Gemini (gemini-2.5-flash).
  */
 export declare const explainErrorWithAI: (prompt: string) => Promise<string>;
+export declare function generateExamWithGemini(params: GenerateExamPayload): Promise<FullExamData>;
+export declare function regenerateQuestionWithGemini(params: GenerateExamPayload): Promise<any>;
 //# sourceMappingURL=geminiService.d.ts.map

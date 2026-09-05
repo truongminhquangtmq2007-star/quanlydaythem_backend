@@ -11,7 +11,8 @@ router.post('/explain-error', authMiddleware_1.verifyToken, aiController_1.expla
 router.post('/generate-remark', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, aiController_1.generateRemark);
 router.post('/save-remark', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, aiController_1.saveRemark);
 router.get('/remark/:studentId/:month', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, aiController_1.getRemark);
-router.get('/insight/:studentId', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, insightController_1.getLatestInsight);
-router.post('/insight/generate', authMiddleware_1.verifyToken, authMiddleware_1.isTeacherOrAdmin, insightController_1.generateInsight);
+// Phân tích kết quả học tập cá nhân hóa: Cho phép Học sinh xem/tạo của chính mình, Giáo viên/Admin xem theo thẩm quyền
+router.get('/insight/:studentId', authMiddleware_1.verifyToken, insightController_1.getLatestInsight);
+router.post('/insight/generate', authMiddleware_1.verifyToken, insightController_1.generateInsight);
 exports.default = router;
 //# sourceMappingURL=aiRoutes.js.map

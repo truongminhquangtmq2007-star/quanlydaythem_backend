@@ -34,8 +34,11 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.explainErrorWithAI = exports.parseFullExamFromFileWithGemini = void 0;
+exports.normalizeExamData = normalizeExamData;
 exports.parseFullExamWithGemini = parseFullExamWithGemini;
 exports.generateWithFallback = generateWithFallback;
+exports.generateExamWithGemini = generateExamWithGemini;
+exports.regenerateQuestionWithGemini = regenerateQuestionWithGemini;
 const genai_1 = require("@google/genai");
 const dotenv = __importStar(require("dotenv"));
 dotenv.config();
@@ -69,6 +72,9 @@ const examResponseSchema = {
                         required: ['A', 'B', 'C', 'D'],
                     },
                     correctAnswer: { type: genai_1.Type.STRING },
+                    explanation: { type: genai_1.Type.STRING },
+                    topic: { type: genai_1.Type.STRING },
+                    difficulty: { type: genai_1.Type.STRING },
                     main_topic: { type: genai_1.Type.STRING },
                     sub_topic: { type: genai_1.Type.STRING },
                 },
@@ -93,6 +99,9 @@ const examResponseSchema = {
                         properties: { a: { type: genai_1.Type.STRING }, b: { type: genai_1.Type.STRING }, c: { type: genai_1.Type.STRING }, d: { type: genai_1.Type.STRING } },
                         required: ['a', 'b', 'c', 'd'],
                     },
+                    explanation: { type: genai_1.Type.STRING },
+                    topic: { type: genai_1.Type.STRING },
+                    difficulty: { type: genai_1.Type.STRING },
                     main_topic: { type: genai_1.Type.STRING },
                     sub_topic: { type: genai_1.Type.STRING },
                 },
@@ -108,6 +117,10 @@ const examResponseSchema = {
                     questionText: { type: genai_1.Type.STRING },
                     image_url: { type: genai_1.Type.STRING },
                     correctAnswer: { type: genai_1.Type.STRING },
+                    explanation: { type: genai_1.Type.STRING },
+                    solution: { type: genai_1.Type.STRING },
+                    topic: { type: genai_1.Type.STRING },
+                    difficulty: { type: genai_1.Type.STRING },
                     main_topic: { type: genai_1.Type.STRING },
                     sub_topic: { type: genai_1.Type.STRING },
                 },
@@ -261,10 +274,103 @@ YÊU CẦU BẮT BUỘC:
    Hãy chọn và trả về CHÍNH XÁC tên "main_topic" và "sub_topic" tương ứng. Không được tự bịa tên nằm ngoài danh sách. ( còn các môn được định nghĩa sẵn thì bắt buộc không được thay đổi hay bịa thêm,Nếu là Tiếng Anh hoặc các môn khác tự định nghĩa các chủ đề phù hợp như "Ngữ pháp", "Đọc hiểu", v.v.)
 `;
 function normalizeExamData(data) {
-    const shared = data.shared_context || data.sharedContexts || [];
-    data.shared_context = shared;
-    data.sharedContexts = shared;
-    return data;
+    if (!data || typeof data !== 'object') {
+        return { part1: [], part2: [], part3: [], shared_context: [], sharedContexts: [] };
+    }
+    const part1 = Array.isArray(data.part1) ? data.part1 : [];
+    const part2 = Array.isArray(data.part2) ? data.part2 : [];
+    const part3 = Array.isArray(data.part3) ? data.part3 : [];
+    part1.forEach((q) => {
+        q.part = 'part1';
+        q.part_number = 1;
+        q.question_type = 'MCQ';
+    });
+    part2.forEach((q) => {
+        q.part = 'part2';
+        q.part_number = 2;
+        q.question_type = 'TRUE_FALSE';
+    });
+    part3.forEach((q) => {
+        q.part = 'part3';
+        q.part_number = 3;
+        q.question_type = 'SHORT_ANSWER';
+    });
+    const rawShared = data.shared_context || data.sharedContexts || [];
+    const sharedList = Array.isArray(rawShared) ? rawShared : rawShared ? [rawShared] : [];
+    sharedList.forEach((item, idx) => {
+        if (!item.id && !item.context_id) {
+            item.id = idx + 1;
+        }
+        const qIds = Array.isArray(item.questionIds) ? item.questionIds : (Array.isArray(item.question_ids) ? item.question_ids : []);
+        item.questionIds = qIds;
+        // Resolve part: do NOT default to part1 if questionIds actually belong to part2 or part3
+        if (!item.part || (item.part !== 'part1' && item.part !== 'part2' && item.part !== 'part3')) {
+            if (item.part_number === 2)
+                item.part = 'part2';
+            else if (item.part_number === 3)
+                item.part = 'part3';
+            else if (item.part_number === 1)
+                item.part = 'part1';
+            else {
+                const subQs = Array.isArray(item.questions) ? item.questions : [];
+                const isSubP2 = subQs.some((sq) => sq.question_type === 'TRUE_FALSE' || sq.statements || sq.part === 'part2' || sq.part_number === 2);
+                const isSubP3 = subQs.some((sq) => sq.question_type === 'SHORT_ANSWER' || sq.part === 'part3' || sq.part_number === 3);
+                const isSubP1 = subQs.some((sq) => sq.question_type === 'MCQ' || sq.options || sq.part === 'part1' || sq.part_number === 1);
+                if (isSubP2 && !isSubP1 && !isSubP3)
+                    item.part = 'part2';
+                else if (isSubP3 && !isSubP1 && !isSubP2)
+                    item.part = 'part3';
+                else if (isSubP1 && !isSubP2 && !isSubP3)
+                    item.part = 'part1';
+                else {
+                    const inP2 = part2.some(q => qIds.some(qid => String(qid) === String(q.id)));
+                    const inP3 = part3.some(q => qIds.some(qid => String(qid) === String(q.id)));
+                    const inP1 = part1.some(q => qIds.some(qid => String(qid) === String(q.id)));
+                    if (inP2 && !inP1 && !inP3)
+                        item.part = 'part2';
+                    else if (inP3 && !inP1 && !inP2)
+                        item.part = 'part3';
+                    else if (inP1 && !inP2 && !inP3)
+                        item.part = 'part1';
+                    else {
+                        const p2HasQ = part2.some(q => qIds.some(qid => String(qid) === String(q.id)) && !q.context_id);
+                        const p3HasQ = part3.some(q => qIds.some(qid => String(qid) === String(q.id)) && !q.context_id);
+                        const p1HasQ = part1.some(q => qIds.some(qid => String(qid) === String(q.id)) && !q.context_id);
+                        if (p2HasQ && !p1HasQ && !p3HasQ)
+                            item.part = 'part2';
+                        else if (p3HasQ && !p1HasQ && !p2HasQ)
+                            item.part = 'part3';
+                        else if (p1HasQ && !p2HasQ && !p3HasQ)
+                            item.part = 'part1';
+                        else
+                            item.part = 'part1';
+                    }
+                }
+            }
+        }
+        // Attach context_id ONLY to questions in the matching part
+        const ctxId = item.id || item.context_id;
+        if (ctxId) {
+            const targetLists = item.part === 'part2' ? [part2]
+                : item.part === 'part3' ? [part3]
+                    : item.part === 'part1' ? [part1]
+                        : [part1, part2, part3];
+            targetLists.forEach(pList => {
+                pList.forEach((q) => {
+                    if (qIds.some(qid => String(qid) === String(q.id))) {
+                        q.context_id = ctxId;
+                    }
+                });
+            });
+        }
+    });
+    return {
+        part1,
+        part2,
+        part3,
+        shared_context: sharedList,
+        sharedContexts: sharedList
+    };
 }
 // ==========================================
 // 1. HÀM GỌI GEMINI XỬ LÝ VĂN BẢN (TEXT)
@@ -348,4 +454,105 @@ const explainErrorWithAI = async (prompt) => {
     }
 };
 exports.explainErrorWithAI = explainErrorWithAI;
+// ==========================================
+// 3. HÀM TẠO ĐỀ THI MỚI TỰ ĐỘNG BẰNG AI (GENERATIVE)
+// ==========================================
+async function generateExamWithGemini(params) {
+    const subject = params.subject || 'Toán Học';
+    const grade = params.grade || '12';
+    const topic = params.topic || 'Tổng hợp kiến thức';
+    const p1Count = params.questionCount?.part1 !== undefined ? Number(params.questionCount.part1) : 12;
+    const p2Count = params.questionCount?.part2 !== undefined ? Number(params.questionCount.part2) : 4;
+    const p3Count = params.questionCount?.part3 !== undefined ? Number(params.questionCount.part3) : 6;
+    const difficulty = params.difficulty || 'DIFFERENTIATED';
+    const duration = params.durationMinutes || 50;
+    const additional = params.additionalPrompt ? `\nYêu cầu bổ sung từ giáo viên:\n${params.additionalPrompt}` : '';
+    const isEnglish = subject.toLowerCase().includes('anh') || subject.toLowerCase().includes('english');
+    const prompt = `
+Bạn là một chuyên gia khảo thí và giáo viên hàng đầu về soạn đề thi chuẩn THPT Quốc gia theo chương trình mới của Bộ Giáo dục & Đào tạo.
+Nhiệm vụ: Tạo một đề thi hoàn chỉnh, chất lượng cao, chuẩn cấu trúc dựa trên các thông số sau:
+- Môn học: ${subject}
+- Khối lớp: Lớp ${grade}
+- Chủ đề / Trọng tâm kiến thức: ${topic}
+- Mức độ đề: ${difficulty} (Dễ: nhận biết, Trung bình: thông hiểu, Khó: vận dụng, Phân hóa: cấu trúc phân hóa chuẩn THPT)
+- Thời gian làm bài: ${duration} phút
+${additional}
+
+CẤU TRÚC PHẦN THI BẮT BUỘC:
+${isEnglish ? `
+- ĐỀ THI TIẾNG ANH: Toàn bộ câu hỏi đưa vào 'part1' (tổng cộng ${p1Count || 40} câu trắc nghiệm 4 lựa chọn A, B, C, D). Để 'part2' và 'part3' là mảng rỗng [].
+- Nếu có bài đọc hiểu (Reading Comprehension / Cloze Test), đưa đoạn văn đọc hiểu chung vào 'shared_context' (với id, content, questionIds, part: 'part1'), và các câu hỏi con tương ứng nằm trong 'part1'.
+` : `
+- Phần 1 (part1): Tạo chính xác ${p1Count} câu hỏi Trắc nghiệm nhiều lựa chọn (4 lựa chọn A, B, C, D). Đánh số id từ 1 đến ${p1Count}.
+- Phần 2 (part2): Tạo chính xác ${p2Count} câu hỏi Trắc nghiệm Đúng/Sai. Đánh số id từ 1 đến ${p2Count}. Mỗi câu BẮT BUỘC có đúng 4 mệnh đề [a, b, c, d].
+- Phần 3 (part3): Tạo chính xác ${p3Count} câu hỏi Trắc nghiệm Trả lời ngắn (kết quả là số hoặc giá trị ngắn gọn). Đánh số id từ 1 đến ${p3Count}.
+- Nếu có ngữ liệu chung (đồ thị, bảng số liệu, đoạn văn), đưa vào 'shared_context' với 'id', 'content', 'questionIds', 'part'.
+`}
+
+QUY TẮC BẮT BUỘC:
+1. ĐÁP ÁN VÀ LỜI GIẢI:
+   - BẮT BUỘC giải chi tiết và điền đáp án chuẩn xác vào 'correctAnswer':
+     + Phần 1: 'correctAnswer' CHỈ điền một trong các chữ cái 'A', 'B', 'C', hoặc 'D'.
+     + Phần 2: 'correctAnswer' là object chứa đúng 4 key: { "a": "Đ" hoặc "S", "b": "Đ" hoặc "S", "c": "Đ" hoặc "S", "d": "Đ" hoặc "S" }.
+     + Phần 3: 'correctAnswer' là chuỗi kết quả ngắn gọn (ví dụ: "12", "-4.5", "1/3").
+   - Viết lời giải / giải thích súc tích vào trường 'explanation' (hoặc 'solution' cho Phần 3).
+2. LATEX VÀ TRÌNH BÀY:
+   - Mọi công thức Toán, Lý, Hóa BẮT BUỘC bọc trong cặp dấu $ $ (ví dụ: $x^2 + 2x - 3 = 0$).
+   - KHÔNG dùng bảng LaTeX \\begin{array} hay \\begin{tabular}. Trình bày bảng bằng văn bản thuần.
+3. PHÂN LOẠI:
+   - Ghi rõ 'topic' và 'difficulty' ('EASY' | 'MEDIUM' | 'HARD') cho từng câu.
+4. ĐỊNH DẠNG:
+   - Trả về dữ liệu chuẩn JSON tuân theo schema đã cung cấp.
+`;
+    const text = await callGeminiWithRetry(prompt);
+    const examData = JSON.parse(text);
+    return normalizeExamData(examData);
+}
+// ==========================================
+// 4. HÀM TẠO LẠI 1 CÂU HỎI BẰNG AI (REGENERATE QUESTION)
+// ==========================================
+async function regenerateQuestionWithGemini(params) {
+    const target = params.targetQuestion;
+    if (!target)
+        throw new Error('Thiếu thông tin câu hỏi cần tạo lại (targetQuestion).');
+    const part = target.part || 'part1';
+    const subject = params.subject || 'Toán Học';
+    const grade = params.grade || '12';
+    const topic = params.topic || target.currentQuestion?.topic || 'Chung';
+    const difficulty = params.difficulty || target.currentQuestion?.difficulty || 'MEDIUM';
+    const prompt = `
+Bạn là chuyên gia khảo thí THPT. Hãy tạo MỘT câu hỏi MỚI hoàn toàn để thay thế câu hỏi trong đề thi:
+- Môn: ${subject}, Khối: Lớp ${grade}
+- Phần: ${part.toUpperCase()}
+- Chủ đề: ${topic}
+- Mức độ: ${difficulty}
+${part === 'part1' ? `
+- Cấu trúc Phần 1: Trắc nghiệm 4 lựa chọn (A, B, C, D). 
+- 'options' phải có đủ 4 lựa chọn A, B, C, D.
+- 'correctAnswer' chỉ là một trong ['A', 'B', 'C', 'D'].
+- Trả về câu hỏi này trong mảng 'part1' (mảng 'part2' và 'part3' để rỗng).
+` : part === 'part2' ? `
+- Cấu trúc Phần 2: Trắc nghiệm Đúng/Sai với chính xác 4 mệnh đề a, b, c, d.
+- 'statements' có đủ a, b, c, d.
+- 'correctAnswer' là { a: 'Đ'|'S', b: 'Đ'|'S', c: 'Đ'|'S', d: 'Đ'|'S' }.
+- Trả về câu hỏi này trong mảng 'part2' (mảng 'part1' và 'part3' để rỗng).
+` : `
+- Cấu trúc Phần 3: Trắc nghiệm Trả lời ngắn.
+- 'correctAnswer' là kết quả số hoặc chuỗi ngắn gọn.
+- Trả về câu hỏi này trong mảng 'part3' (mảng 'part1' và 'part2' để rỗng).
+`}
+- Kèm trường 'explanation' giải thích phương pháp giải.
+- Công thức Toán/Khoa học bọc trong $ $.
+- Trả về JSON theo đúng schema.
+`;
+    const text = await callGeminiWithRetry(prompt);
+    const examData = JSON.parse(text);
+    const normalized = normalizeExamData(examData);
+    const list = normalized[part];
+    if (list && list.length > 0) {
+        const newQ = { ...list[0], id: target.id };
+        return newQ;
+    }
+    throw new Error('AI không tạo được câu hỏi thay thế hợp lệ.');
+}
 //# sourceMappingURL=geminiService.js.map
