@@ -48,9 +48,9 @@ export const upsertSession = async (req: AuthRequest, res: Response): Promise<vo
     if (id) {
       result = await pool.query(
         `UPDATE sessions 
-         SET session_date=$1, start_time=$2, content=$3, homework=$4 
+         SET session_date=$1, start_time=$2, content=$3, homework=$4, end_time=$4 
          WHERE id=$5 RETURNING *`,
-        [session_date, start_time, content, homework, id]
+        [session_date, start_time, content, homework, end_time, id]
       );
     } else {
       result = await pool.query(
