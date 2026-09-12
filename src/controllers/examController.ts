@@ -1492,7 +1492,35 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
             return;
         }
 
-        let { document_id, title, grade, subject, duration_minutes, class_id, exam_content, allow_view_answers, file_url, is_draft } = req.body;
+        let { document_id, title, grade, subject, duration_minutes, class_id, exam_content, allow_view_answers, file_url, is_draft, questions, contexts } = req.body;
+        
+        // Reconstruct exam_content if only questions array was provided
+        if (!exam_content && Array.isArray(questions) && questions.length > 0) {
+            const p1 = questions.filter((q: any) => q.part_number === 1 || q.part === 'part1' || q.question_type === 'MCQ');
+            const p2 = questions.filter((q: any) => q.part_number === 2 || q.part === 'part2' || q.question_type === 'TRUE_FALSE');
+            const p3 = questions.filter((q: any) => q.part_number === 3 || q.part === 'part3' || q.question_type === 'SHORT_ANSWER');
+            exam_content = {
+                part1: p1,
+                part2: p2,
+                part3: p3,
+                sharedContexts: contexts || req.body.sharedContexts || []
+            };
+        } else if (exam_content && Array.isArray(questions) && questions.length > 0) {
+            // Ensure image_url from questions array is synced to exam_content if present
+            ['part1', 'part2', 'part3'].forEach((pKey) => {
+                if (Array.isArray(exam_content[pKey])) {
+                    exam_content[pKey].forEach((q: any) => {
+                        const matchingQ = questions.find((item: any) => 
+                            (item.part === pKey || item.part_number === (pKey === 'part1' ? 1 : pKey === 'part2' ? 2 : 3)) &&
+                            (item.id === q.id || item.content === q.questionText)
+                        );
+                        if (matchingQ?.image_url && !q.image_url) {
+                            q.image_url = matchingQ.image_url;
+                        }
+                    });
+                }
+            });
+        }
         
         let actual_document_id = parseInt(String(document_id || 0), 10);
 
