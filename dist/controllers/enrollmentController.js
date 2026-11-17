@@ -142,17 +142,22 @@ const getStudentsInClass = async (req, res) => {
 exports.getStudentsInClass = getStudentsInClass;
 // Lấy danh sách lớp mà một học sinh đang học
 const getClassesForStudent = async (req, res) => {
-    const { student_id } = req.params;
+    const rawStudentId = req.params.student_id;
     const user = req.user;
     try {
-        let targetStudentId = student_id;
+        if (typeof rawStudentId !== 'string' || rawStudentId.trim() === '') {
+            res.status(400).json({ message: 'Tham số student_id không hợp lệ.' });
+            return;
+        }
+        const normalizedStudentId = rawStudentId.trim();
+        let targetStudentId = normalizedStudentId;
         if (user?.role === 'STUDENT') {
             const canonicalId = await (0, studentIdentity_1.resolveCanonicalStudentId)(user);
             if (!canonicalId) {
                 res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
                 return;
             }
-            if (student_id && student_id !== 'me' && Number(student_id) !== Number(canonicalId)) {
+            if (normalizedStudentId !== 'me' && Number(normalizedStudentId) !== Number(canonicalId)) {
                 res.status(403).json({ message: 'Học sinh không có quyền xem dữ liệu của học sinh khác.' });
                 return;
             }

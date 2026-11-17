@@ -166,17 +166,23 @@ export const getStudentsInClass = async (req: AuthRequest, res: Response): Promi
 
 // Lấy danh sách lớp mà một học sinh đang học
 export const getClassesForStudent = async (req: AuthRequest, res: Response): Promise<void> => {
-  const { student_id } = req.params;
+  const rawStudentId = req.params.student_id;
   const user = req.user;
   try {
-    let targetStudentId: string | number = student_id;
+    if (typeof rawStudentId !== 'string' || rawStudentId.trim() === '') {
+      res.status(400).json({ message: 'Tham số student_id không hợp lệ.' });
+      return;
+    }
+    const normalizedStudentId: string = rawStudentId.trim();
+
+    let targetStudentId: string | number = normalizedStudentId;
     if (user?.role === 'STUDENT') {
       const canonicalId = await resolveCanonicalStudentId(user);
       if (!canonicalId) {
         res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
         return;
       }
-      if (student_id && student_id !== 'me' && Number(student_id) !== Number(canonicalId)) {
+      if (normalizedStudentId !== 'me' && Number(normalizedStudentId) !== Number(canonicalId)) {
         res.status(403).json({ message: 'Học sinh không có quyền xem dữ liệu của học sinh khác.' });
         return;
       }
