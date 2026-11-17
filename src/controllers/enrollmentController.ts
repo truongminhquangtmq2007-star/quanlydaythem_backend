@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { resolveCanonicalStudentId, UNLINKED_STUDENT_MESSAGE } from '../utils/studentIdentity';
 
 // 1. Xem danh sách đã xếp lớp (GET) - Dùng JOIN để lấy tên thật thay vì chỉ lấy ID
 export const getEnrollments = async (req: AuthRequest, res: Response) => {
@@ -168,6 +169,20 @@ export const getClassesForStudent = async (req: AuthRequest, res: Response): Pro
   const { student_id } = req.params;
   const user = req.user;
   try {
+    let targetStudentId: string | number = student_id;
+    if (user?.role === 'STUDENT') {
+      const canonicalId = await resolveCanonicalStudentId(user);
+      if (!canonicalId) {
+        res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
+        return;
+      }
+      if (student_id && student_id !== 'me' && Number(student_id) !== Number(canonicalId)) {
+        res.status(403).json({ message: 'Học sinh không có quyền xem dữ liệu của học sinh khác.' });
+        return;
+      }
+      targetStudentId = canonicalId;
+    }
+
     let result;
     if (user?.role === 'TEACHER') {
       result = await pool.query(
@@ -175,7 +190,7 @@ export const getClassesForStudent = async (req: AuthRequest, res: Response): Pro
          FROM classes c
          JOIN enrollments e ON c.id = e.class_id
          WHERE e.student_id = $1 AND c.teacher_id = $2`,
-        [student_id, user.id]
+        [targetStudentId, user.id]
       );
     } else {
       result = await pool.query(
@@ -183,7 +198,7 @@ export const getClassesForStudent = async (req: AuthRequest, res: Response): Pro
          FROM classes c
          JOIN enrollments e ON c.id = e.class_id
          WHERE e.student_id = $1`,
-        [student_id]
+        [targetStudentId]
       );
     }
     res.status(200).json(result.rows);

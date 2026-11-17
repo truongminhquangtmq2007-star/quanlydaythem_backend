@@ -1,5 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { resolveCanonicalStudentId } from '../utils/studentIdentity';
+export { resolveCanonicalStudentId };
 export declare const saveAnswerKey: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const getDraftExam: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const saveDraftExam: (req: AuthRequest, res: Response) => Promise<void>;
@@ -13,7 +15,6 @@ export declare const createExamFromText: (req: AuthRequest, res: Response) => Pr
 export declare const parseExamFromFile: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const getAllExams: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const publishExam: (req: AuthRequest, res: Response) => Promise<void>;
-export declare const resolveCanonicalStudentId: (user: any) => Promise<number | null>;
-export declare const resolveTutorMode: (doc: any, examKey: any, submission: any) => 'SOCRATIC' | 'EXPLANATORY';
+export declare const resolveTutorMode: (doc: any, examKey: any, submission: any) => "SOCRATIC" | "EXPLANATORY";
 export declare const askAITutor: (req: AuthRequest, res: Response) => Promise<void>;
 //# sourceMappingURL=examController.d.ts.map

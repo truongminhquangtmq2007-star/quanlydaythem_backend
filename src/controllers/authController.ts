@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../db';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { resolveCanonicalStudentId, UNLINKED_STUDENT_MESSAGE } from '../utils/studentIdentity';
 
 interface AuthRequest extends Request {
   user?: {
@@ -29,6 +30,13 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     
     if (!isPasswordValid) {
       res.status(401).json({ message: "Sai tên đăng nhập hoặc mật khẩu" });
+      return;
+    }
+
+    if (String(user.role || '').toUpperCase() === 'STUDENT') {
+      res.status(403).json({
+        message: 'Tài khoản học sinh vui lòng đăng nhập tại Cổng Học Sinh (/student/login).'
+      });
       return;
     }
 
@@ -158,8 +166,29 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
+    const canonicalStudentId = isLegacyOnly
+      ? null
+      : await resolveCanonicalStudentId({
+          id: user.id,
+          role: 'STUDENT',
+          student_id: user.student_id
+        });
+
+    if (!canonicalStudentId) {
+      res.status(403).json({
+        message: UNLINKED_STUDENT_MESSAGE
+      });
+      return;
+    }
+
     const token = jwt.sign(
-      { id: user.id, role: 'STUDENT', full_name: user.full_name, student_id: user.student_id },
+      {
+        id: user.id,
+        username: user.username,
+        role: 'STUDENT',
+        full_name: user.full_name,
+        student_id: canonicalStudentId
+      },
       process.env.JWT_SECRET as string,
       { expiresIn: '1d' }
     );
@@ -171,7 +200,7 @@ export const studentLogin = async (req: Request, res: Response): Promise<void> =
         id: user.id,
         full_name: user.full_name,
         role: 'STUDENT',
-        student_id: user.student_id,
+        student_id: canonicalStudentId,
         title: user.title || 'Học sinh'
       }
     });
@@ -245,14 +274,23 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
     const result = await pool.query(
-      'SELECT id, username, full_name, role, title, bank_code, bank_name, account_number, account_name FROM users WHERE id = $1',
+      'SELECT id, username, full_name, role, student_id, title, bank_code, bank_name, account_number, account_name FROM users WHERE id = $1',
       [req.user.id]
     );
     if (result.rows.length === 0) {
       res.status(404).json({ message: 'Không tìm thấy người dùng' });
       return;
     }
-    res.status(200).json(result.rows[0]);
+    const userRow = result.rows[0];
+    if (String(userRow.role || '').toUpperCase() === 'STUDENT') {
+      const canonicalStudentId = await resolveCanonicalStudentId(req.user);
+      if (!canonicalStudentId) {
+        res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
+        return;
+      }
+      userRow.student_id = canonicalStudentId;
+    }
+    res.status(200).json(userRow);
   } catch (error) {
     res.status(500).json({ message: 'Lỗi server' });
   }

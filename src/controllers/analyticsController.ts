@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { resolveCanonicalStudentId } from './examController';
+import { resolveCanonicalStudentId, UNLINKED_STUDENT_MESSAGE } from '../utils/studentIdentity';
 
 // ========================================================
 // 1. LẤY PHÂN TÍCH CHUYÊN ĐỀ CỦA MỘT HỌC SINH
@@ -24,7 +24,7 @@ export const getStudentTopics = async (req: AuthRequest, res: Response): Promise
             if (!canonicalId) {
                 res.status(403).json({ 
                     status: 'forbidden',
-                    message: 'Tài khoản học sinh không hợp lệ hoặc chưa được liên kết với hồ sơ học sinh.' 
+                    message: UNLINKED_STUDENT_MESSAGE 
                 });
                 return;
             }

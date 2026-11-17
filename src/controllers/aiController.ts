@@ -3,6 +3,7 @@ import { Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { generateWithFallback } from '../services/geminiService';
+import { resolveCanonicalStudentId, UNLINKED_STUDENT_MESSAGE } from '../utils/studentIdentity';
 
 export const explainError = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
@@ -12,16 +13,20 @@ export const explainError = async (req: AuthRequest, res: Response): Promise<voi
             return;
         }
 
-        let targetStudentId = req.user?.student_id || req.user?.id;
+        let targetStudentId: number | null = null;
         if (req.user?.role === 'STUDENT') {
-            // Student can only query for themselves
-            if (student_id && Number(student_id) !== Number(req.user?.student_id || req.user?.id)) {
+            const canonicalId = await resolveCanonicalStudentId(req.user);
+            if (!canonicalId) {
+                res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
+                return;
+            }
+            if (student_id !== undefined && student_id !== null && student_id !== '' && student_id !== 'me' && Number(student_id) !== Number(canonicalId)) {
                 res.status(403).json({ message: 'Không có quyền truy cập dữ liệu của học sinh khác.' });
                 return;
             }
-            targetStudentId = req.user?.student_id || req.user?.id;
+            targetStudentId = canonicalId;
         } else if (student_id) {
-            targetStudentId = student_id;
+            targetStudentId = Number(student_id);
         }
 
         const qRes = await pool.query(`SELECT content FROM questions WHERE id = $1`, [question_id]);

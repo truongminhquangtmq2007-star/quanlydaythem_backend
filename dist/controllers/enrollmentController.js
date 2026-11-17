@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getClassesForStudent = exports.getStudentsInClass = exports.deleteEnrollment = exports.updateEnrollmentStatus = exports.enrollStudent = exports.getEnrollments = void 0;
 const db_1 = __importDefault(require("../db"));
+const studentIdentity_1 = require("../utils/studentIdentity");
 // 1. Xem danh sách đã xếp lớp (GET) - Dùng JOIN để lấy tên thật thay vì chỉ lấy ID
 const getEnrollments = async (req, res) => {
     try {
@@ -144,18 +145,31 @@ const getClassesForStudent = async (req, res) => {
     const { student_id } = req.params;
     const user = req.user;
     try {
+        let targetStudentId = student_id;
+        if (user?.role === 'STUDENT') {
+            const canonicalId = await (0, studentIdentity_1.resolveCanonicalStudentId)(user);
+            if (!canonicalId) {
+                res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
+                return;
+            }
+            if (student_id && student_id !== 'me' && Number(student_id) !== Number(canonicalId)) {
+                res.status(403).json({ message: 'Học sinh không có quyền xem dữ liệu của học sinh khác.' });
+                return;
+            }
+            targetStudentId = canonicalId;
+        }
         let result;
         if (user?.role === 'TEACHER') {
             result = await db_1.default.query(`SELECT c.id, c.class_name 
          FROM classes c
          JOIN enrollments e ON c.id = e.class_id
-         WHERE e.student_id = $1 AND c.teacher_id = $2`, [student_id, user.id]);
+         WHERE e.student_id = $1 AND c.teacher_id = $2`, [targetStudentId, user.id]);
         }
         else {
             result = await db_1.default.query(`SELECT c.id, c.class_name 
          FROM classes c
          JOIN enrollments e ON c.id = e.class_id
-         WHERE e.student_id = $1`, [student_id]);
+         WHERE e.student_id = $1`, [targetStudentId]);
         }
         res.status(200).json(result.rows);
     }

@@ -6,6 +6,7 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || 'dummy_secret';
 const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://quanlydaythem-api.onrender.com/api/calendar/callback';
 
 import { AuthRequest } from '../middleware/authMiddleware';
+import { resolveCanonicalStudentId, UNLINKED_STUDENT_MESSAGE } from '../utils/studentIdentity';
 
 // 1. Hàm lấy danh sách buổi học
 // 1. Hàm lấy danh sách buổi học (Hỗ trợ xem Lịch Tổng)
@@ -185,6 +186,20 @@ export const deleteSession = async (req: AuthRequest, res: Response): Promise<vo
 export const getPublishedSessions = async (req: AuthRequest, res: Response): Promise<void> => {
   const { student_id } = req.query; 
   try {
+    let targetStudentId: any = student_id;
+    if (req.user?.role === 'STUDENT') {
+      const canonicalId = await resolveCanonicalStudentId(req.user);
+      if (!canonicalId) {
+        res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
+        return;
+      }
+      if (student_id !== undefined && student_id !== null && student_id !== '' && student_id !== 'me' && Number(student_id) !== Number(canonicalId)) {
+        res.status(403).json({ message: 'Học sinh không có quyền xem dữ liệu của học sinh khác.' });
+        return;
+      }
+      targetStudentId = canonicalId;
+    }
+
     const result = await pool.query(
       `SELECT s.*, 
               e.is_present, e.focus_level, e.teacher_notes, e.is_billed, 
@@ -199,7 +214,7 @@ export const getPublishedSessions = async (req: AuthRequest, res: Response): Pro
        LEFT JOIN session_evaluations e ON s.id = e.session_id AND e.student_id = $1
        WHERE s.is_published = true 
        ORDER BY s.session_date DESC, s.start_time DESC`, // <-- Sửa ASC thành DESC ở đây
-      [student_id]
+      [targetStudentId]
     );
     res.status(200).json(result.rows);
   } catch (error) {

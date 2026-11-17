@@ -9,6 +9,7 @@ const googleapis_1 = require("googleapis");
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'dummy_id';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || 'dummy_secret';
 const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://quanlydaythem-api.onrender.com/api/calendar/callback';
+const studentIdentity_1 = require("../utils/studentIdentity");
 // 1. Hàm lấy danh sách buổi học
 // 1. Hàm lấy danh sách buổi học (Hỗ trợ xem Lịch Tổng)
 // 1. Hàm lấy danh sách buổi học (Hỗ trợ xem Lịch Tổng & Đếm đánh giá)
@@ -172,6 +173,19 @@ exports.deleteSession = deleteSession;
 const getPublishedSessions = async (req, res) => {
     const { student_id } = req.query;
     try {
+        let targetStudentId = student_id;
+        if (req.user?.role === 'STUDENT') {
+            const canonicalId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
+            if (!canonicalId) {
+                res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
+                return;
+            }
+            if (student_id !== undefined && student_id !== null && student_id !== '' && student_id !== 'me' && Number(student_id) !== Number(canonicalId)) {
+                res.status(403).json({ message: 'Học sinh không có quyền xem dữ liệu của học sinh khác.' });
+                return;
+            }
+            targetStudentId = canonicalId;
+        }
         const result = await db_1.default.query(`SELECT s.*, 
               e.is_present, e.focus_level, e.teacher_notes, e.is_billed, 
               (SELECT EXISTS(
@@ -185,7 +199,7 @@ const getPublishedSessions = async (req, res) => {
        LEFT JOIN session_evaluations e ON s.id = e.session_id AND e.student_id = $1
        WHERE s.is_published = true 
        ORDER BY s.session_date DESC, s.start_time DESC`, // <-- Sửa ASC thành DESC ở đây
-        [student_id]);
+        [targetStudentId]);
         res.status(200).json(result.rows);
     }
     catch (error) {

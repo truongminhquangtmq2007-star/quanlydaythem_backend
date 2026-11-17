@@ -5,12 +5,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateEmail = exports.getStudentExams = exports.getDocuments = exports.getSchedule = exports.getDashboard = void 0;
 const db_1 = __importDefault(require("../db"));
-const examController_1 = require("./examController");
+const studentIdentity_1 = require("../utils/studentIdentity");
 const getDashboard = async (req, res) => {
     try {
-        const studentId = await (0, examController_1.resolveCanonicalStudentId)(req.user);
+        const studentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền truy cập Student Portal hoặc tài khoản chưa liên kết hồ sơ học sinh.' });
+            res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
             return;
         }
         // 1. Hồ sơ học sinh
@@ -186,9 +186,9 @@ const getDashboard = async (req, res) => {
 exports.getDashboard = getDashboard;
 const getSchedule = async (req, res) => {
     try {
-        const studentId = await (0, examController_1.resolveCanonicalStudentId)(req.user);
+        const studentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền' });
+            res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
             return;
         }
         const query = `
@@ -213,9 +213,9 @@ const getSchedule = async (req, res) => {
 exports.getSchedule = getSchedule;
 const getDocuments = async (req, res) => {
     try {
-        const studentId = await (0, examController_1.resolveCanonicalStudentId)(req.user);
+        const studentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền' });
+            res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
             return;
         }
         const query = `
@@ -240,9 +240,9 @@ const getDocuments = async (req, res) => {
 exports.getDocuments = getDocuments;
 const getStudentExams = async (req, res) => {
     try {
-        const studentId = await (0, examController_1.resolveCanonicalStudentId)(req.user);
+        const studentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền' });
+            res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
             return;
         }
         const query = `
@@ -271,9 +271,9 @@ const getStudentExams = async (req, res) => {
 exports.getStudentExams = getStudentExams;
 const updateEmail = async (req, res) => {
     try {
-        const studentId = await (0, examController_1.resolveCanonicalStudentId)(req.user);
+        const studentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền' });
+            res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
             return;
         }
         const { email } = req.body;

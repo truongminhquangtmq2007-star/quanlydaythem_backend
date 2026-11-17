@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.saveRemark = exports.getRemark = exports.generateRemark = exports.explainError = void 0;
 const db_1 = __importDefault(require("../db"));
 const geminiService_1 = require("../services/geminiService");
+const studentIdentity_1 = require("../utils/studentIdentity");
 const explainError = async (req, res) => {
     try {
         const { question_id, student_answer, student_id } = req.body;
@@ -13,17 +14,21 @@ const explainError = async (req, res) => {
             res.status(400).json({ message: 'Thiếu thông tin question_id hoặc student_answer' });
             return;
         }
-        let targetStudentId = req.user?.student_id || req.user?.id;
+        let targetStudentId = null;
         if (req.user?.role === 'STUDENT') {
-            // Student can only query for themselves
-            if (student_id && Number(student_id) !== Number(req.user?.student_id || req.user?.id)) {
+            const canonicalId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
+            if (!canonicalId) {
+                res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
+                return;
+            }
+            if (student_id !== undefined && student_id !== null && student_id !== '' && student_id !== 'me' && Number(student_id) !== Number(canonicalId)) {
                 res.status(403).json({ message: 'Không có quyền truy cập dữ liệu của học sinh khác.' });
                 return;
             }
-            targetStudentId = req.user?.student_id || req.user?.id;
+            targetStudentId = canonicalId;
         }
         else if (student_id) {
-            targetStudentId = student_id;
+            targetStudentId = Number(student_id);
         }
         const qRes = await db_1.default.query(`SELECT content FROM questions WHERE id = $1`, [question_id]);
         if (qRes.rows.length === 0) {

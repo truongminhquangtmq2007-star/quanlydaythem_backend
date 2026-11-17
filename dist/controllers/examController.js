@@ -3,13 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.askAITutor = exports.resolveTutorMode = exports.resolveCanonicalStudentId = exports.publishExam = exports.getAllExams = exports.parseExamFromFile = exports.createExamFromText = exports.generateAIExam = exports.getExamKey = exports.getSubmissionDetail = exports.getMySubmissions = exports.getExamSubmissions = exports.submitExam = exports.saveDraftExam = exports.getDraftExam = exports.saveAnswerKey = void 0;
+exports.askAITutor = exports.resolveTutorMode = exports.publishExam = exports.getAllExams = exports.parseExamFromFile = exports.createExamFromText = exports.generateAIExam = exports.getExamKey = exports.getSubmissionDetail = exports.getMySubmissions = exports.getExamSubmissions = exports.submitExam = exports.saveDraftExam = exports.getDraftExam = exports.saveAnswerKey = exports.resolveCanonicalStudentId = void 0;
 const cloudinary_1 = require("cloudinary");
 const geminiService_1 = require("../services/geminiService");
 const db_1 = __importDefault(require("../db"));
 // 👇 Nhập hàm gọi Gemini từ service bạn vừa tạo
 const geminiService_2 = require("../services/geminiService");
 const examValidation_1 = require("../validations/examValidation");
+const studentIdentity_1 = require("../utils/studentIdentity");
+Object.defineProperty(exports, "resolveCanonicalStudentId", { enumerable: true, get: function () { return studentIdentity_1.resolveCanonicalStudentId; } });
 // ========================================================
 // 1. API GIÁO VIÊN: LƯU ĐÁP ÁN CHUẨN VÀ NỘI DUNG ĐỀ VÀO DATABASE
 // ========================================================
@@ -247,7 +249,11 @@ const normalizeTrueFalse = (val) => {
 // ========================================================
 const getDraftExam = async (req, res) => {
     try {
-        const studentId = req.user?.student_id || req.user?.id;
+        const studentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
+        if (!studentId) {
+            res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
+            return;
+        }
         const examId = req.params.id;
         const result = await db_1.default.query(`SELECT student_answers, last_saved_at, time_taken_seconds FROM exam_submissions 
              WHERE student_id = $1 AND document_id = $2 AND status = 'IN_PROGRESS'`, [studentId, examId]);
@@ -266,7 +272,11 @@ const getDraftExam = async (req, res) => {
 exports.getDraftExam = getDraftExam;
 const saveDraftExam = async (req, res) => {
     try {
-        const studentId = req.user?.student_id || req.user?.id;
+        const studentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
+        if (!studentId) {
+            res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
+            return;
+        }
         const examId = req.params.id;
         const { answers, student_answers, time_taken_seconds } = req.body;
         const draftAnswers = answers !== undefined ? answers : (student_answers !== undefined ? student_answers : {});
@@ -290,7 +300,11 @@ exports.saveDraftExam = saveDraftExam;
 // ========================================================
 const submitExam = async (req, res) => {
     try {
-        const studentId = req.user?.student_id || req.user?.id;
+        const studentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
+        if (!studentId) {
+            res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
+            return;
+        }
         const examId = req.params?.id || req.body?.document_id || req.body?.exam_id;
         const { student_answers, answers, cheat_count, time_taken_seconds } = req.body || {};
         if (!examId) {
@@ -911,7 +925,11 @@ exports.getExamSubmissions = getExamSubmissions;
 // ========================================================
 const getMySubmissions = async (req, res) => {
     try {
-        const studentId = req.user?.student_id || req.user?.id;
+        const studentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
+        if (!studentId) {
+            res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
+            return;
+        }
         const result = await db_1.default.query(`SELECT 
                 es.id,
                 es.document_id,
@@ -956,10 +974,16 @@ const getSubmissionDetail = async (req, res) => {
         }
         const submission = subRes.rows[0];
         // Authorization: student can only view their own submissions; teachers/admins can view any
-        const currentStudentId = user?.student_id || user?.id;
-        if (user?.role === 'STUDENT' && Number(submission.student_id) !== Number(currentStudentId)) {
-            res.status(403).json({ message: 'Bạn không có quyền xem kết quả bài thi này' });
-            return;
+        if (user?.role === 'STUDENT') {
+            const currentStudentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(user);
+            if (!currentStudentId) {
+                res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
+                return;
+            }
+            if (Number(submission.student_id) !== Number(currentStudentId)) {
+                res.status(403).json({ message: 'Bạn không có quyền xem kết quả bài thi này' });
+                return;
+            }
         }
         const allowView = Boolean(submission.allow_view_answers || user?.role === 'TEACHER' || user?.role === 'ADMIN');
         let parsedDetails = typeof submission.answers === 'string' ? JSON.parse(submission.answers) : (submission.answers || []);
@@ -1029,6 +1053,11 @@ const getExamKey = async (req, res) => {
         const data = result.rows[0];
         // Nếu là học sinh:
         if (user && user.role === 'STUDENT') {
+            const canonicalStudentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(user);
+            if (!canonicalStudentId) {
+                res.status(403).json({ message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE });
+                return;
+            }
             if (contentOnly) {
                 // Khi đang làm bài thi: ẩn toàn bộ đáp án đúng & lời giải
                 const strippedContent = data.exam_content ? JSON.parse(JSON.stringify(data.exam_content)) : null;
@@ -1531,34 +1560,6 @@ const ai = new genai_1.GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY || '',
 });
 // ========================================================
-// 5. HELPER: RESOLVE CANONICAL STUDENT ID
-// ========================================================
-const resolveCanonicalStudentId = async (user) => {
-    if (!user || user.role !== 'STUDENT')
-        return null;
-    const userId = user.id;
-    if (!userId)
-        return null;
-    // 1. CANONICAL FLOW: JWT user -> users.id -> users.student_id
-    const uRes = await db_1.default.query(`SELECT id, student_id FROM users WHERE id = $1 AND role = 'STUDENT'`, [userId]);
-    if (uRes.rows.length === 0)
-        return null;
-    const linkedStudentId = uRes.rows[0].student_id;
-    // Nếu users.student_id null hoặc không tồn tại -> reject rõ ràng, TUYỆT ĐỐI KHÔNG đoán theo user.id -> students.id
-    if (!linkedStudentId)
-        return null;
-    // Nếu token có claim student_id, bắt buộc phải khớp chính xác với users.student_id trong DB
-    if (user.student_id && Number(user.student_id) !== Number(linkedStudentId)) {
-        return null;
-    }
-    // 2. CANONICAL FLOW: users.student_id -> students.id
-    const sRes = await db_1.default.query(`SELECT id FROM students WHERE id = $1`, [linkedStudentId]);
-    if (sRes.rows.length === 0)
-        return null;
-    return Number(sRes.rows[0].id);
-};
-exports.resolveCanonicalStudentId = resolveCanonicalStudentId;
-// ========================================================
 // 6. HELPER: RESOLVE TUTOR MODE (PRACTICE vs REAL EXAM)
 // ========================================================
 const resolveTutorMode = (doc, examKey, submission) => {
@@ -1606,11 +1607,11 @@ const askAITutor = async (req, res) => {
             return;
         }
         // B. RESOLVE CANONICAL STUDENT ID (Gate 2)
-        const canonicalStudentId = await (0, exports.resolveCanonicalStudentId)(req.user);
+        const canonicalStudentId = await (0, studentIdentity_1.resolveCanonicalStudentId)(req.user);
         if (!canonicalStudentId) {
             res.status(403).json({
                 success: false,
-                message: 'Không tìm thấy hồ sơ học sinh hợp lệ liên kết với tài khoản này.',
+                message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE,
                 error: { code: 'INVALID_STUDENT_IDENTITY', message: 'Student profile not found' }
             });
             return;

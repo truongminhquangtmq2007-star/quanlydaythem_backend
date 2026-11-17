@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import pool from '../db';
 import { buildLearningSnapshot, generateStudentPersonalizedInsight } from '../services/learningInsightService';
-import { resolveCanonicalStudentId } from './examController';
+import { resolveCanonicalStudentId, UNLINKED_STUDENT_MESSAGE } from '../utils/studentIdentity';
 
 export const getLatestInsight = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
@@ -19,7 +19,7 @@ export const getLatestInsight = async (req: AuthRequest, res: Response): Promise
             if (!canonicalId) {
                 res.status(403).json({ 
                     status: 'forbidden',
-                    message: 'Tài khoản học sinh không hợp lệ hoặc chưa được liên kết với hồ sơ học sinh.' 
+                    message: UNLINKED_STUDENT_MESSAGE 
                 });
                 return;
             }
@@ -98,7 +98,7 @@ export const generateInsight = async (req: AuthRequest, res: Response): Promise<
             if (!canonicalId) {
                 res.status(403).json({ 
                     status: 'forbidden',
-                    message: 'Tài khoản học sinh không hợp lệ hoặc chưa được liên kết với hồ sơ học sinh.' 
+                    message: UNLINKED_STUDENT_MESSAGE 
                 });
                 return;
             }

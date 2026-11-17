@@ -1,13 +1,13 @@
 import { Response } from 'express';
 import pool from '../db';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { resolveCanonicalStudentId } from './examController';
+import { resolveCanonicalStudentId, UNLINKED_STUDENT_MESSAGE } from '../utils/studentIdentity';
 
 export const getDashboard = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền truy cập Student Portal hoặc tài khoản chưa liên kết hồ sơ học sinh.' });
+            res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
             return;
         }
 
@@ -210,7 +210,7 @@ export const getSchedule = async (req: AuthRequest, res: Response): Promise<void
     try {
         const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền' });
+            res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
             return;
         }
 
@@ -237,7 +237,7 @@ export const getDocuments = async (req: AuthRequest, res: Response): Promise<voi
     try {
         const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền' });
+            res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
             return;
         }
 
@@ -264,7 +264,7 @@ export const getStudentExams = async (req: AuthRequest, res: Response): Promise<
     try {
         const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền' });
+            res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
             return;
         }
 
@@ -295,7 +295,7 @@ export const updateEmail = async (req: AuthRequest, res: Response): Promise<void
     try {
         const studentId = await resolveCanonicalStudentId(req.user);
         if (!studentId) {
-            res.status(403).json({ message: 'Không có quyền' });
+            res.status(403).json({ message: UNLINKED_STUDENT_MESSAGE });
             return;
         }
         const { email } = req.body;

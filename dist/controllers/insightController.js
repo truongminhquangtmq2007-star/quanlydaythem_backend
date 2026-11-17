@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateInsight = exports.getLatestInsight = void 0;
 const db_1 = __importDefault(require("../db"));
 const learningInsightService_1 = require("../services/learningInsightService");
-const examController_1 = require("./examController");
+const studentIdentity_1 = require("../utils/studentIdentity");
 const getLatestInsight = async (req, res) => {
     try {
         const user = req.user;
@@ -16,11 +16,11 @@ const getLatestInsight = async (req, res) => {
         }
         let targetStudentId = null;
         if (user.role === 'STUDENT') {
-            const canonicalId = await (0, examController_1.resolveCanonicalStudentId)(user);
+            const canonicalId = await (0, studentIdentity_1.resolveCanonicalStudentId)(user);
             if (!canonicalId) {
                 res.status(403).json({
                     status: 'forbidden',
-                    message: 'Tài khoản học sinh không hợp lệ hoặc chưa được liên kết với hồ sơ học sinh.'
+                    message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE
                 });
                 return;
             }
@@ -88,11 +88,11 @@ const generateInsight = async (req, res) => {
         }
         let targetStudentId = null;
         if (user.role === 'STUDENT') {
-            const canonicalId = await (0, examController_1.resolveCanonicalStudentId)(user);
+            const canonicalId = await (0, studentIdentity_1.resolveCanonicalStudentId)(user);
             if (!canonicalId) {
                 res.status(403).json({
                     status: 'forbidden',
-                    message: 'Tài khoản học sinh không hợp lệ hoặc chưa được liên kết với hồ sơ học sinh.'
+                    message: studentIdentity_1.UNLINKED_STUDENT_MESSAGE
                 });
                 return;
             }
